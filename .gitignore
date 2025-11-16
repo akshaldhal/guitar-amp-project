@@ -1,0 +1,6 @@
+build/
+temp/
+.vscode/
+.DS_Store
+compile_commands.json
+.cache/
