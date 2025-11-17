@@ -17,6 +17,9 @@ void log_message(LogLevel level, const char *message, ...) {
     case LOG_LEVEL_ERROR:
       printf("\033[0;31m[ERROR] ");
       break;
+    case LOG_LEVEL_TRACE:
+      printf("\033[0;35m[TRACE] ");
+      break;
     default:
       printf("[LOG] ");
       break;
