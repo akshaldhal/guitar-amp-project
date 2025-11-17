@@ -37,3 +37,4 @@ const PaDeviceInfo* get_device_info(int deviceIndex) {
   }
   return deviceInfo;
 }
+
