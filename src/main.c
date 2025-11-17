@@ -1,6 +1,6 @@
-#include <stdio.h>
+#include <logger.h>
 
 int main() {
-    printf("Hello, World!\n");
-    return 0;
+  log_message(LOG_LEVEL_INFO, "Hello, World!");
+  return 0;
 }
