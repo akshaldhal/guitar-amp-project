@@ -165,6 +165,12 @@ int remove_modifier_from_chain(SoundEffectChain* chain, SoundModifier* modifier)
 void clear_sound_effect_chain(SoundEffectChain* chain);
 
 /**
+ * Destroy the sound effect chain and free memory
+ * @param chain Chain to destroy
+ */
+void destroy_sound_effect_chain(SoundEffectChain* chain);
+
+/**
  * Apply the effect chain to an audio buffer
  * @param chain Effect chain to apply
  * @param buffer Audio buffer to process
