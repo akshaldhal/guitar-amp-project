@@ -112,6 +112,7 @@ SoundEffectChain* create_sound_effect_chain(void) {
   }
   chain->head = NULL;
   chain->modifierCount = 0;
+  chain->flattenedArray = NULL;
   log_message(LOG_LEVEL_DEBUG, "Created new sound effect chain");
   return chain;
 }

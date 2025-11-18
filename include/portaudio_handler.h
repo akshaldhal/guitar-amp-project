@@ -48,6 +48,7 @@ struct SoundModifier {
 typedef struct SoundEffectChain {
   SoundModifier* head;
   int modifierCount;  /* Track number of modifiers in chain */
+  SoundModifier** flattenedArray; /* Optional: flattened array for efficient processing */
 } SoundEffectChain;
 
 /* Audio buffer structure for processing */
