@@ -1,6 +1,8 @@
 #ifndef EFFECTS_DSP_H
 #define EFFECTS_DSP_H
 
+// THIS IS NOT SIMD COMPATIBLE CODE. All DSP functions here are scalar per-sample implementations. FIXME LATER.
+
 #include <stdint.h>
 #include <stddef.h>
 #include <math.h>

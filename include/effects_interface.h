@@ -5,7 +5,7 @@
 #include <math.h>
 #include <logger.h>
 
-// for handling all sorts of audio effects and related functions, assumes that audio buffers will be passed in as float arrays
+// FIXME TO USE STRUCTS FROM effects_dsp.h INSTEAD OF REDEFINING HERE!!!
 
 typedef enum {
   AMP_CHANNEL_CLEAN,         // Clean channels: Very low gain, high headroom, wide bandwidth

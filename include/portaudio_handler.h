@@ -1,6 +1,8 @@
 #ifndef PORTAUDIO_HANDLER_H
 #define PORTAUDIO_HANDLER_H
 
+//FIXME TO USE STRUCTS/EFFECTS FROM effects_interface.h INSTEAD OF REDEFINING PRIMITIVES HERE!!!
+
 #include <portaudio.h>
 #include <stdio.h>
 #include <stdlib.h>
