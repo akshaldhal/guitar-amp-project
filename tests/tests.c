@@ -12,6 +12,7 @@ void test_log_message() {
 }
 
 void port_audio_stream_test() {
+  // THIS USES PORTAUDIO DIRECTLY, IT SHOULD BE REPLACED WITH TESTS FOR THE PORTAUDIO HANDLER WRAPPER!!!
   PaError err = Pa_Initialize();
   if (err != paNoError) {
     log_message(LOG_LEVEL_ERROR, "ERROR: Pa_Initialize returned 0x%x", err);
