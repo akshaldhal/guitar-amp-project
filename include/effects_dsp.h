@@ -6,6 +6,23 @@
 #include <math.h>
 #include <simde/x86/avx2.h>
 
+#ifndef SIMD_WIDTH
+#ifdef __AVX512F__
+#define SIMD_WIDTH 16
+#elif defined(__AVX2__)
+#define SIMD_WIDTH 8
+#elif defined(__AVX__)
+#define SIMD_WIDTH 8
+#elif defined(__SSE2__)
+#define SIMD_WIDTH 4
+#elif defined(__ARM_NEON__)
+#define SIMD_WIDTH 4
+#else
+#define SIMD_WIDTH 1
+#endif
+#endif
+
+
 static inline float clampf(float x, float lo, float hi) {
   return (x < lo) ? lo : (x > hi) ? hi : x;
 }
@@ -23,12 +40,17 @@ static inline float linear_to_db(float lin) {
 #define EPSILON_F 1e-12f
 #endif
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846f
+#endif
+
 typedef struct {
   float a0;
+  float b0;
+  float b1;
   float z1;
 } OnePole;
 
-// Math function
 void onepole_init(OnePole* f, float cutoffHz, float sampleRate, int isHighPass);
 void onepole_process(OnePole* f, const float* in, float* out, size_t numSamples);
 
@@ -43,8 +65,8 @@ typedef enum {
 } BiquadType;
 
 typedef struct {
-  float a0, a1, a2;
-  float b1, b2;
+  float a1, a2;
+  float b0, b1, b2;
   float z1, z2;
 } Biquad;
 

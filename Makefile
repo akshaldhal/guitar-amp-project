@@ -7,7 +7,7 @@ ifeq ($(UNAME_S), Linux)
   LIB_DIR = ./lib/linux
   INCLUDE_DIR = ./include/linux
 else ifeq ($(UNAME_S), Darwin)
-  LIB_NAME = m -framework Cocoa
+  LIB_NAME = portaudio -lm -framework Carbon -framework CoreAudio -framework AudioToolbox -framework AudioUnit -framework CoreServices
   LIB_EXT = dylib
   RPATH = -Wl,-rpath,'@loader_path/lib'
   LIB_DIR = ./lib/macos
@@ -23,7 +23,7 @@ TEST_DIR = ./tests
 
 CFLAGS = -I$(INCLUDE_DIR) -I$(COMMON_INCLUDE_DIR) -MMD -MP
 LDFLAGS = -L$(BUILD_DIR)/lib $(RPATH)
-DEBUG_FLAGS = -g -O0 -Wall -Werror -Wextra -fsanitize=address -fsanitize=undefined -Wformat -Wformat-security
+DEBUG_FLAGS = -g -O0 -Wall -Werror -Wextra -fsanitize=address -fsanitize=undefined -Wformat -Wformat-security -march=native
 RELEASE_FLAGS = -O3 -flto -march=native -ffast-math
 
 LIBS = -l$(LIB_NAME)

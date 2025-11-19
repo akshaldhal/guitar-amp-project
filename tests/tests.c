@@ -1,5 +1,6 @@
 #include <logger.h>
 #include <portaudio.h>
+#include <effects_dsp.h>
 #include <stdlib.h>
 
 void test_log_message() {
@@ -160,8 +161,13 @@ void port_audio_stream_test() {
   }
 }
 
+int get_simd_width() {
+  return SIMD_WIDTH;
+}
+
 int main() {
-  test_log_message();
-  port_audio_stream_test();
+  // test_log_message();
+  // port_audio_stream_test();
+  // printf("SIMD width: %d\n", get_simd_width());
   return 0;
 }
