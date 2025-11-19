@@ -24,7 +24,7 @@ TEST_DIR = ./tests
 CFLAGS = -I$(INCLUDE_DIR) -I$(COMMON_INCLUDE_DIR) -MMD -MP
 LDFLAGS = -L$(BUILD_DIR)/lib $(RPATH)
 DEBUG_FLAGS = -g -O0 -Wall -Werror -Wextra -fsanitize=address -fsanitize=undefined -Wformat -Wformat-security
-RELEASE_FLAGS = -O3 -fstack-protector-all -D_FORTIFY_SOURCE=2
+RELEASE_FLAGS = -O3 -flto -march=native -ffast-math
 
 LIBS = -l$(LIB_NAME)
 
