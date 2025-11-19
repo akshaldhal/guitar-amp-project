@@ -1,8 +1,6 @@
 #ifndef EFFECTS_DSP_H
 #define EFFECTS_DSP_H
 
-// THIS IS NOT SIMD COMPATIBLE CODE. All DSP functions here are scalar per-sample implementations. FIXME LATER.
-
 #include <stdint.h>
 #include <stddef.h>
 #include <math.h>
@@ -26,12 +24,13 @@ static inline float linear_to_db(float lin) {
 #endif
 
 typedef struct {
-  float a0;    /* filter coefficient */
-  float z1;    /* state */
+  float a0;
+  float z1;
 } OnePole;
 
+// Math function
 void onepole_init(OnePole* f, float cutoffHz, float sampleRate, int isHighPass);
-float onepole_process(OnePole* f, float in);
+void onepole_process(OnePole* f, const float* in, float* out, size_t numSamples);
 
 typedef enum {
   BQ_LPF,
@@ -44,39 +43,41 @@ typedef enum {
 } BiquadType;
 
 typedef struct {
-  float a0, a1, a2;   /* numerator (stored normalized) */
-  float b1, b2;     /* denominator (note b0 normalized to 1) */
-  float z1, z2;     /* states */
+  float a0, a1, a2;
+  float b1, b2;
+  float z1, z2;
 } Biquad;
 
-/* Initialize biquad with frequency (Hz), Q, gainDb (for shelves/peaks), and type */
+// Math function
 void biquad_init(Biquad* bq, BiquadType type, float freqHz, float Q, float gainDb, float sampleRate);
-float biquad_process(Biquad* bq, float in);
+void biquad_process(Biquad* bq, const float* in, float* out, size_t numSamples);
 
 typedef struct {
-  float a;  /* feedback coefficient */
-  float z1;   /* state */
+  float a;
+  float z1;
 } AllPass1;
 
-void allpass1_init(AllPass1* ap, float delaySamples, float feedback); /* delaySamples may be used for advanced forms; simple variant uses feedback */
-float allpass1_process(AllPass1* ap, float in);
+// Math function
+void allpass1_init(AllPass1* ap, float delaySamples, float feedback);
+void allpass1_process(AllPass1* ap, const float* in, float* out, size_t numSamples);
 
 typedef struct {
-  float *buffer;   /* circular buffer pointer (owned by caller or allocator) */
-  size_t size;     /* buffer size in samples (power-of-two recommended) */
+  float *buffer;
+  size_t size;
   size_t writeIndex;
   float sampleRate;
 } DelayLine;
 
-/* Initialize expects an allocated buffer (size samples). Implementations should not allocate per-sample. */
+// Math function
 void delayline_init(DelayLine* dl, float* bufferMemory, size_t size, float sampleRate);
-void delayline_write(DelayLine* dl, float sample);
-float delayline_read_linear(DelayLine* dl, float delaySamples);   /* linear interpolation */
-float delayline_read_cubic(DelayLine* dl, float delaySamples);    /* cubic interpolation */
+void delayline_write(DelayLine* dl, const float* samples, size_t numSamples);
+void delayline_read_linear(DelayLine* dl, float* out, size_t numSamples, float delaySamples);
+void delayline_read_cubic(DelayLine* dl, float* out, size_t numSamples, float delaySamples);
 
-/* Helper interpolation functions */
-float lerp(float a, float b, float t);
-float cubic_interp(float ym1, float y0, float y1, float y2, float t);
+// Math function
+void lerp(const float* a, const float* b, const float* t, float* out, size_t numSamples);
+// Math function
+void cubic_interp(const float* ym1, const float* y0, const float* y1, const float* y2, const float* t, float* out, size_t numSamples);
 
 typedef enum {
   LFO_SINE,
@@ -87,124 +88,155 @@ typedef enum {
 } LFOType;
 
 typedef struct {
-  float phase;    /* 0..1 */
-  float freq;     /* Hz */
+  float phase;
+  float freq;
   float sampleRate;
-  float amp;      /* amplitude 0..1 */
-  float dc;       /* DC offset */
+  float amp;
+  float dc;
   LFOType type;
 } LFO;
 
+// Math function
 void lfo_init(LFO* lfo, LFOType type, float freqHz, float amp, float dc, float sampleRate);
-float lfo_process(LFO* lfo);   /* returns -amp..+amp plus dc */
+void lfo_process(LFO* lfo, float* out, size_t numSamples);
 
 typedef struct {
-  float env;       /* current envelope (linear) */
-  float attackCoeff;   /* per-sample coefficient */
-  float releaseCoeff;  /* per-sample coefficient */
+  float env;
+  float attackCoeff;
+  float releaseCoeff;
   float sampleRate;
-  int isRMS;       /* if set, follows RMS envelope (squared input) else peak (abs) */
+  int isRMS;
 } EnvelopeDetector;
 
-/* attackMs / releaseMs in milliseconds */
+// Math function
 void env_init(EnvelopeDetector* ed, float attackMs, float releaseMs, float sampleRate, int isRMS);
-float env_process(EnvelopeDetector* ed, float in);
+void env_process(EnvelopeDetector* ed, const float* in, float* out, size_t numSamples);
 
-/* Compute gain reduction in linear domain given input level (dB), threshold (dB), ratio (e.g., 4.0 for 4:1) */
-float compute_gain_reduction_db(float inputDb, float thresholdDb, float ratio);
+// Math function
+void compute_gain_reduction_db(const float* inputDb, const float* thresholdDb, float ratio, float* out, size_t numSamples);
 
-/* Apply gain smoothing (attack/release) to target gain reduction (in linear) */
-float apply_gain_smoothing(float currentGain, float targetGain, float attackCoeff, float releaseCoeff);
+// Math function
+void apply_gain_smoothing(float* currentGain, const float* targetGain, float attackCoeff, float releaseCoeff, size_t numSamples);
 
-/* Utility: convert ms -> per-sample coeff (exp curve) */
+// Math function
 float ms_to_coeff(float ms, float sampleRate);
 
 typedef enum {
   CLIP_HARD,
   CLIP_SOFT_TANH,
   CLIP_ARCTAN,
-  CLIP_SIGMOID,     /* arbitrary soft shape */
+  CLIP_SIGMOID,
   CLIP_CUSTOM_TABLE
 } ClipperType;
 
-/* Simple per-sample clippers */
-float hard_clip(float x, float threshold);  /* threshold linear amplitude */
-float tanh_clip(float x, float drive);    /* uses tanhf(drive * x) approximator, normalized */
-float arctan_clip(float x, float drive);
+// Model from real amps
+void hard_clip(const float* in, float threshold, float* out, size_t numSamples);
+// Model from real amps
+void tanh_clip(const float* in, float drive, float* out, size_t numSamples);
+// Model from real amps
+void arctan_clip(const float* in, float drive, float* out, size_t numSamples);
 
-/* Waveshaper table: fill an array lookupTable of size n with curve values for x in [-1..1] */
-void build_waveshaper_table(float *lookupTable, size_t n, ClipperType type, float drive);
+// Model from real amps
+void build_waveshaper_table(float *lookupTable, size_t tableSize, ClipperType type, float drive);
 
-/* Table lookup (linear interp) */
-float waveshaper_lookup(float *lookupTable, size_t n, float x);
+// Math function
+void waveshaper_lookup(const float* in, float* out, const float* lookupTable, size_t tableSize, size_t numSamples);
 
-/* Prepare buffers for oversampling. These functions are helpers — implementations can be expensive. */
-void oversample2x(const float *in, float *out, size_t n);    /* upsample by 2 (out size = 2*n) */
-void downsample2x(const float *in, float *out, size_t n);    /* downsample by 2 (in size = 2*n -> out size = n) */
+// Math function
+void oversample2x(const float *in, float *out, size_t inLen);
+// Math function
+void downsample2x(const float *in, float *out, size_t inLen);
 
 typedef struct {
-  float *combBuffers;   /* preallocated memory (caller-managed) */
+  float *combBuffers;
   size_t *combSizes;
   size_t numCombs;
   float *combFeedbacks;
-  float *apBuffer;    /* all-pass buffers */
+  float *apBuffer;
   size_t *apSizes;
   size_t numAP;
-  float wet;        /* wet mix 0..1 */
-  float dry;        /* dry mix 0..1 */
+  float wet;
+  float dry;
   float sampleRate;
 } SimpleReverb;
 
-/* init with arrays preallocated by caller (avoids dynamic alloc in realtime) */
+// Model from real amps
 void reverb_init(SimpleReverb* r, float sampleRate, float wet, float dry);
-float reverb_process_sample(SimpleReverb* r, float in);
+void reverb_process(SimpleReverb* r, const float* in, float* out, size_t numSamples);
 
 typedef struct {
   DelayLine dl;
   float feedback;
 } CombFilter;
 
-void comb_init(CombFilter* cf, float* bufferMemory, size_t size, float feedback, float sampleRate);
-float comb_process(CombFilter* cf, float in);
+// Model from real amps
+void comb_init(CombFilter* cf, float* bufferMemory, size_t bufferSize, float feedback, float sampleRate);
+void comb_process(CombFilter* cf, const float* in, float* out, size_t numSamples);
 
-/* Convolve single input block with IR using naive conv (use FFT for long IRs in .c implementation).
- * in: input buffer, inLen
- * ir: impulse response, irLen
- * out: output buffer, outLen must be >= inLen + irLen - 1
- */
-void convolve_naive(const float* in, size_t inLen, const float* ir, size_t irLen, float* out);
+typedef struct {
+  float **partitions;
+  float **fftBuffers;
+  size_t partitionSize;
+  size_t numPartitions;
+  size_t currentPartition;
+  size_t irLength;
+  float *irBuffer;
+  size_t irBufferSize;
+  float *overlapBuffer;
+  size_t overlapSize;
+  float sampleRate;
+  int irSampleRate;
+  float dryMix;
+  float wetMix;
+  int isActive;
+} Convolver;
 
-/* --- FFT wrapper interface (optional) ---
- * Provide wrappers to FFT/IFFT (user can implement using kissfft/fftpack/fftw etc.)
- * Note: if you do not plan FFT, you can leave these unimplemented and use convolve_naive for short IRs.
- */
-int fft_init(int size); /* returns 0 on success */
+// Math function
+int convolver_init(Convolver* conv, float sampleRate, size_t partitionSize, size_t maxIrLength);
+// Math function
+int convolver_set_ir(Convolver* conv, const float* irData, size_t irLength, int irSampleRate);
+// Math function
+void convolver_process(Convolver* conv, const float* in, float* out, size_t numSamples);
+// Math function
+size_t convolver_get_latency_samples(const Convolver* conv);
+// Math function
+void convolver_set_mix(Convolver* conv, float dryDb, float wetDb);
+// Math function
+void convolver_reset(Convolver* conv);
+// Math function
+void convolver_destroy(Convolver* conv);
+
+// Math function
+int fft_init(int size);
+// Math function
 int fft_forward(const float* timeBuf, float* freqBuf, int size);
+// Math function
 int fft_inverse(const float* freqBuf, float* timeBuf, int size);
 
-/* Basic granular pitch-shift helper: expects preallocated ring buffer & window */
 typedef struct {
   DelayLine dl;
-  float *window;    /* Hann window array (len = windowSize) */
+  float *window;
   size_t windowSize;
-  float hop;      /* in samples */
+  float hop;
   float sampleRate;
 } GranularPS;
 
+// Model from real amps
 void granular_init(GranularPS* ps, float* bufferMemory, size_t bufferSize, float* windowMemory, size_t windowSize, float hop, float sampleRate);
-float granular_process_sample(GranularPS* ps, float in, float pitchRatio); /* returns processed sample */
+void granular_process(GranularPS* ps, const float* in, float* out, size_t numSamples, float pitchRatio);
 
-/* Utility: build hann window */
+// Math function
 void build_hann_window(float* w, size_t n);
 
-float white_noise();  /* returns -1..+1 (simple LCG internal state in .c file) */
+// Math function
+void white_noise(float* out, size_t n);
 
+// Math function
 void apply_window_inplace(float* buffer, const float* window, size_t n);
 
+// Math function
 float hz_to_omega(float hz, float sampleRate);
 
-/* Compute per-sample coefficient for exponential smoothing from ms value:
- * coeff = exp(-1/(ms*sampleRate/1000)) */
 static inline float ms_to_coef(float ms, float sampleRate) {
   if (ms <= 0.0f) return 0.0f;
   return expf(-1.0f / ((ms * 0.001f) * sampleRate));
