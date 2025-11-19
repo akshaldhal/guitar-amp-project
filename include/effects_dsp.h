@@ -30,10 +30,6 @@ typedef struct {
 void onepole_init(OnePole* f, float cutoffHz, float sampleRate, int isHighPass);
 float onepole_process(OnePole* f, float in);
 
-/* ---------------------------
- * Biquad (Direct Form I) — general purpose
- * --------------------------- */
-
 typedef enum {
   BQ_LPF,
   BQ_HPF,
@@ -54,10 +50,6 @@ typedef struct {
 void biquad_init(Biquad* bq, BiquadType type, float freqHz, float Q, float gainDb, float sampleRate);
 float biquad_process(Biquad* bq, float in);
 
-/* ---------------------------
- * All-pass (simple 1st/2nd order scaffolding)
- * --------------------------- */
-
 typedef struct {
   float a;  /* feedback coefficient */
   float z1;   /* state */
@@ -65,10 +57,6 @@ typedef struct {
 
 void allpass1_init(AllPass1* ap, float delaySamples, float feedback); /* delaySamples may be used for advanced forms; simple variant uses feedback */
 float allpass1_process(AllPass1* ap, float in);
-
-/* ---------------------------
- * Delay line & interpolation
- * --------------------------- */
 
 typedef struct {
   float *buffer;   /* circular buffer pointer (owned by caller or allocator) */
@@ -86,10 +74,6 @@ float delayline_read_cubic(DelayLine* dl, float delaySamples);    /* cubic inter
 /* Helper interpolation functions */
 float lerp(float a, float b, float t);
 float cubic_interp(float ym1, float y0, float y1, float y2, float t);
-
-/* ---------------------------
- * LFOs (low frequency oscillators)
- * --------------------------- */
 
 typedef enum {
   LFO_SINE,
@@ -111,10 +95,6 @@ typedef struct {
 void lfo_init(LFO* lfo, LFOType type, float freqHz, float amp, float dc, float sampleRate);
 float lfo_process(LFO* lfo);   /* returns -amp..+amp plus dc */
 
-/* ---------------------------
- * Envelope detector (RMS / peak with attack/release)
- * --------------------------- */
-
 typedef struct {
   float env;       /* current envelope (linear) */
   float attackCoeff;   /* per-sample coefficient */
@@ -127,10 +107,6 @@ typedef struct {
 void env_init(EnvelopeDetector* ed, float attackMs, float releaseMs, float sampleRate, int isRMS);
 float env_process(EnvelopeDetector* ed, float in);
 
-/* ---------------------------
- * Dynamics: compressor / limiter utilities
- * --------------------------- */
-
 /* Compute gain reduction in linear domain given input level (dB), threshold (dB), ratio (e.g., 4.0 for 4:1) */
 float compute_gain_reduction_db(float inputDb, float thresholdDb, float ratio);
 
@@ -139,10 +115,6 @@ float apply_gain_smoothing(float currentGain, float targetGain, float attackCoef
 
 /* Utility: convert ms -> per-sample coeff (exp curve) */
 float ms_to_coeff(float ms, float sampleRate);
-
-/* ---------------------------
- * Clippers / waveshapers
- * --------------------------- */
 
 typedef enum {
   CLIP_HARD,
@@ -163,17 +135,9 @@ void build_waveshaper_table(float *lookupTable, size_t n, ClipperType type, floa
 /* Table lookup (linear interp) */
 float waveshaper_lookup(float *lookupTable, size_t n, float x);
 
-/* ---------------------------
- * Oversampling support (2x/4x) - simple API (implement polyphase or FIR as needed)
- * --------------------------- */
-
 /* Prepare buffers for oversampling. These functions are helpers — implementations can be expensive. */
 void oversample2x(const float *in, float *out, size_t n);    /* upsample by 2 (out size = 2*n) */
 void downsample2x(const float *in, float *out, size_t n);    /* downsample by 2 (in size = 2*n -> out size = n) */
-
-/* ---------------------------
- * Reverb (Schroeder-style comb/allpass)
- * --------------------------- */
 
 typedef struct {
   float *combBuffers;   /* preallocated memory (caller-managed) */
@@ -192,10 +156,6 @@ typedef struct {
 void reverb_init(SimpleReverb* r, float sampleRate, float wet, float dry);
 float reverb_process_sample(SimpleReverb* r, float in);
 
-/* ---------------------------
- * Comb filter primitive (for reverb/delay networks)
- * --------------------------- */
-
 typedef struct {
   DelayLine dl;
   float feedback;
@@ -203,10 +163,6 @@ typedef struct {
 
 void comb_init(CombFilter* cf, float* bufferMemory, size_t size, float feedback, float sampleRate);
 float comb_process(CombFilter* cf, float in);
-
-/* ---------------------------
- * FIR convolution (IR) — cabinet simulation
- * --------------------------- */
 
 /* Convolve single input block with IR using naive conv (use FFT for long IRs in .c implementation).
  * in: input buffer, inLen
@@ -223,10 +179,6 @@ int fft_init(int size); /* returns 0 on success */
 int fft_forward(const float* timeBuf, float* freqBuf, int size);
 int fft_inverse(const float* freqBuf, float* timeBuf, int size);
 
-/* ---------------------------
- * Pitch shifting (granular helper)
- * --------------------------- */
-
 /* Basic granular pitch-shift helper: expects preallocated ring buffer & window */
 typedef struct {
   DelayLine dl;
@@ -242,27 +194,11 @@ float granular_process_sample(GranularPS* ps, float in, float pitchRatio); /* re
 /* Utility: build hann window */
 void build_hann_window(float* w, size_t n);
 
-/* ---------------------------
- * Noise generator
- * --------------------------- */
-
 float white_noise();  /* returns -1..+1 (simple LCG internal state in .c file) */
-
-/* ---------------------------
- * Utilities: windowing / shift helpers
- * --------------------------- */
 
 void apply_window_inplace(float* buffer, const float* window, size_t n);
 
-/* ---------------------------
- * Misc helpers: sample rate conversions
- * --------------------------- */
-
 float hz_to_omega(float hz, float sampleRate);
-
-/* ---------------------------
- * Safety / initialization helpers
- * --------------------------- */
 
 /* Compute per-sample coefficient for exponential smoothing from ms value:
  * coeff = exp(-1/(ms*sampleRate/1000)) */
@@ -271,20 +207,4 @@ static inline float ms_to_coef(float ms, float sampleRate) {
   return expf(-1.0f / ((ms * 0.001f) * sampleRate));
 }
 
-/* ---------------------------
- * Notes for implementers
- * ---------------------------
- * - Most process functions are single-sample for minimal latency. You can also provide block versions.
- * - Avoid malloc/free in realtime; allocate buffers during init using your own allocator.
- * - Use oversampling around nonlinear stages (distortion/waveshapers) to reduce aliasing.
- * - Envelope detector should operate on squared (RMS) or abs (peak) values.
- * - For limiter/compressor implement side-chain: detector -> smoothing -> gain computer -> apply to sample.
- */
-
-/* ---------------------------
- * Exported version macro
- * --------------------------- */
-#define EFFECTS_DSP_VERSION_MAJOR 1
-#define EFFECTS_DSP_VERSION_MINOR 0
-
-#endif /* EFFECTS_DSP_H */
+#endif
