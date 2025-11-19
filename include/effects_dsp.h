@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <math.h>
+#include <simde/x86/avx2.h>
 
 static inline float clampf(float x, float lo, float hi) {
   return (x < lo) ? lo : (x > hi) ? hi : x;
