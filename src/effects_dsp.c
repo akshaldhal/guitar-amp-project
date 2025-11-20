@@ -320,8 +320,41 @@ void lfo_process(LFO* lfo, float* out, size_t numSamples) {
 }
 
 void env_init(EnvelopeDetector* ed, float attackMs, float releaseMs, float sampleRate, int isRMS) {
-  implement me
+  ed->attackCoeff = ms_to_coef(attackMs, sampleRate);
+  ed->releaseCoeff = ms_to_coef(releaseMs, sampleRate);
+  ed->isRMS = isRMS;
+  ed->sampleRate = sampleRate;
+  ed->env = 0.0f;
 }
+
 void env_process(EnvelopeDetector* ed, const float* in, float* out, size_t numSamples) {
-  implement me
+  float env = ed->env;
+  const float attack = ed->attackCoeff;
+  const float release = ed->releaseCoeff;
+  const int isRMS = ed->isRMS;
+  const float coeff_diff = attack - release;
+
+  for (size_t i = 0; i < numSamples; i++)
+  {
+    float input = in[i];
+    float target;
+    if (isRMS) {
+      target = input * input;
+    } else {
+      target = fabsf(input);
+    }
+    float diff = target - env;
+    float is_rising = (float)(diff > 0.0f); 
+    float coeff = release + (is_rising * coeff_diff);
+    env += diff * coeff;
+    float output = env;
+    if (isRMS) {
+      output = sqrtf(output);
+    }
+
+    out[i] = output;
+  }
+  ed->env = env;
 }
+
+// Stuff with circular buffers and interpolation
