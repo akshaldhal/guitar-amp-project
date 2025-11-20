@@ -265,3 +265,63 @@ void apply_gain_smoothing(float* currentGain, const float* targetGain, float* st
   *state = curr;
 }
 
+void lfo_init(LFO* lfo, LFOType type, float freqHz, float amp, float dc, float sampleRate) {
+  lfo->amp = amp;
+  lfo->dc = dc;
+  lfo->freq = freqHz;
+  lfo->phase = 0.0f;
+  lfo->phase_inc = freqHz/sampleRate;
+  lfo->sampleRate = sampleRate;
+  lfo->type = type;
+}
+
+void lfo_process(LFO* lfo, float* out, size_t numSamples) {
+  float phase = lfo->phase;
+  float phase_inc = lfo->phase_inc;
+  float amp = lfo->amp;
+  float dc = lfo->dc;
+  LFOType type = lfo->type;
+
+  for (size_t i = 0; i < numSamples; i++)
+  {
+    float sample;
+
+    switch (type) {
+      case (LFO_SINE):
+        sample = sinf(phase * 2.0f * M_PI);
+        break;
+      case (LFO_TRI):
+        sample = 1.0f - 4.0f * fabsf(phase - 0.5f);
+        break;
+      case (LFO_SAW):
+        sample = 2.0f * phase - 1.0f;
+        break;
+      case (LFO_SQUARE):
+        sample = (phase < 0.5f) ? 1.0f : -1.0f;
+        break;
+      case (LFO_NOISE):
+        sample = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f;
+        break;
+      default:
+        sample = 0.0f;
+        break;
+    }
+
+    out[i] = (sample * amp) + dc;
+
+    // updating phase is unimportant in case of noise, if this conditional branching outweighs phase update, then phase update should happen anyway
+    if (type != LFO_NOISE) {
+      phase += phase_inc;
+      phase -= floorf(phase);
+    }
+  }
+
+  lfo->phase = phase;
+}
+
+void env_init(EnvelopeDetector* ed, float attackMs, float releaseMs, float sampleRate, int isRMS) {
+  implement me
+}
+void env_process(EnvelopeDetector* ed, const float* in, float* out, size_t numSamples) {
+  implement me
+}

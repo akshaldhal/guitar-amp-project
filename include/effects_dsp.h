@@ -106,6 +106,7 @@ typedef enum {
 
 typedef struct {
   float phase;
+  float phase_inc;
   float freq;
   float sampleRate;
   float amp;
