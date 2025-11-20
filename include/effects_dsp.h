@@ -70,7 +70,6 @@ typedef struct {
   float z1, z2;
 } Biquad;
 
-// Math function
 void biquad_init(Biquad* bq, BiquadType type, float freqHz, float Q, float gainDb, float sampleRate);
 void biquad_process(Biquad* bq, const float* in, float* out, size_t numSamples);
 
@@ -79,7 +78,6 @@ typedef struct {
   float z1;
 } AllPass1;
 
-// Math function
 void allpass1_init(AllPass1* ap, float delaySamples, float feedback);
 void allpass1_process(AllPass1* ap, const float* in, float* out, size_t numSamples);
 
@@ -90,15 +88,12 @@ typedef struct {
   float sampleRate;
 } DelayLine;
 
-// Math function
 void delayline_init(DelayLine* dl, float* bufferMemory, size_t size, float sampleRate);
 void delayline_write(DelayLine* dl, const float* samples, size_t numSamples);
 void delayline_read_linear(DelayLine* dl, float* out, size_t numSamples, float delaySamples);
 void delayline_read_cubic(DelayLine* dl, float* out, size_t numSamples, float delaySamples);
 
-// Math function
 void lerp(const float* a, const float* b, const float* t, float* out, size_t numSamples);
-// Math function
 void cubic_interp(const float* ym1, const float* y0, const float* y1, const float* y2, const float* t, float* out, size_t numSamples);
 
 typedef enum {
@@ -118,7 +113,6 @@ typedef struct {
   LFOType type;
 } LFO;
 
-// Math function
 void lfo_init(LFO* lfo, LFOType type, float freqHz, float amp, float dc, float sampleRate);
 void lfo_process(LFO* lfo, float* out, size_t numSamples);
 
@@ -130,17 +124,13 @@ typedef struct {
   int isRMS;
 } EnvelopeDetector;
 
-// Math function
 void env_init(EnvelopeDetector* ed, float attackMs, float releaseMs, float sampleRate, int isRMS);
 void env_process(EnvelopeDetector* ed, const float* in, float* out, size_t numSamples);
 
-// Math function
 void compute_gain_reduction_db(const float* inputDb, const float* thresholdDb, float ratio, float* out, size_t numSamples);
 
-// Math function
-void apply_gain_smoothing(float* currentGain, const float* targetGain, float attackCoeff, float releaseCoeff, size_t numSamples);
+void apply_gain_smoothing(float* currentGain, const float* targetGain, float* state, float attackCoeff, float releaseCoeff, size_t numSamples);
 
-// Math function
 float ms_to_coeff(float ms, float sampleRate);
 
 typedef enum {
@@ -148,25 +138,18 @@ typedef enum {
   CLIP_SOFT_TANH,
   CLIP_ARCTAN,
   CLIP_SIGMOID,
-  CLIP_CUSTOM_TABLE
+  CLIP_CUBIC_SOFT
 } ClipperType;
 
-// Model from real amps
 void hard_clip(const float* in, float threshold, float* out, size_t numSamples);
-// Model from real amps
 void tanh_clip(const float* in, float drive, float* out, size_t numSamples);
-// Model from real amps
 void arctan_clip(const float* in, float drive, float* out, size_t numSamples);
 
-// Model from real amps
 void build_waveshaper_table(float *lookupTable, size_t tableSize, ClipperType type, float drive);
 
-// Math function
 void waveshaper_lookup(const float* in, float* out, const float* lookupTable, size_t tableSize, size_t numSamples);
 
-// Math function
 void oversample2x(const float *in, float *out, size_t inLen);
-// Math function
 void downsample2x(const float *in, float *out, size_t inLen);
 
 typedef struct {
@@ -182,7 +165,6 @@ typedef struct {
   float sampleRate;
 } SimpleReverb;
 
-// Model from real amps
 void reverb_init(SimpleReverb* r, float sampleRate, float wet, float dry);
 void reverb_process(SimpleReverb* r, const float* in, float* out, size_t numSamples);
 
@@ -191,7 +173,6 @@ typedef struct {
   float feedback;
 } CombFilter;
 
-// Model from real amps
 void comb_init(CombFilter* cf, float* bufferMemory, size_t bufferSize, float feedback, float sampleRate);
 void comb_process(CombFilter* cf, const float* in, float* out, size_t numSamples);
 
@@ -213,26 +194,16 @@ typedef struct {
   int isActive;
 } Convolver;
 
-// Math function
 int convolver_init(Convolver* conv, float sampleRate, size_t partitionSize, size_t maxIrLength);
-// Math function
 int convolver_set_ir(Convolver* conv, const float* irData, size_t irLength, int irSampleRate);
-// Math function
 void convolver_process(Convolver* conv, const float* in, float* out, size_t numSamples);
-// Math function
 size_t convolver_get_latency_samples(const Convolver* conv);
-// Math function
 void convolver_set_mix(Convolver* conv, float dryDb, float wetDb);
-// Math function
 void convolver_reset(Convolver* conv);
-// Math function
 void convolver_destroy(Convolver* conv);
 
-// Math function
 int fft_init(int size);
-// Math function
 int fft_forward(const float* timeBuf, float* freqBuf, int size);
-// Math function
 int fft_inverse(const float* freqBuf, float* timeBuf, int size);
 
 typedef struct {
@@ -243,20 +214,15 @@ typedef struct {
   float sampleRate;
 } GranularPS;
 
-// Model from real amps
 void granular_init(GranularPS* ps, float* bufferMemory, size_t bufferSize, float* windowMemory, size_t windowSize, float hop, float sampleRate);
 void granular_process(GranularPS* ps, const float* in, float* out, size_t numSamples, float pitchRatio);
 
-// Math function
 void build_hann_window(float* w, size_t n);
 
-// Math function
 void white_noise(float* out, size_t n);
 
-// Math function
 void apply_window_inplace(float* buffer, const float* window, size_t n);
 
-// Math function
 float hz_to_omega(float hz, float sampleRate);
 
 static inline float ms_to_coef(float ms, float sampleRate) {

@@ -2,6 +2,106 @@
 
 // implementations assumes 1 channel input and output, can be fixed upto 8 using simd
 
+// Stateless, can use SIMD out of box:
+
+void hard_clip(const float* in, float threshold, float* out, size_t numSamples) {
+  for (size_t n = 0; n < numSamples; n++) {
+    float input = in[n];
+    out[n] = fminf(threshold, fmaxf(-threshold, input));
+  }
+}
+
+void lerp(const float* a, const float* b, const float* t, float* out, size_t numSamples) {
+  for (size_t n = 0; n < numSamples; n++) {
+    out[n] = a[n] + t[n] * (b[n] - a[n]);
+  }
+}
+
+void tanh_clip(const float* in, float drive, float* out, size_t numSamples) {
+  for (size_t n = 0; n < numSamples; n++) {
+    out[n] = tanhf(in[n] * drive);
+  }
+}
+
+void arctan_clip(const float* in, float drive, float* out, size_t numSamples) {
+  for (size_t n = 0; n < numSamples; n++) {
+    out[n] = (2.0f / M_PI) * atanf(in[n] * drive);
+  }
+}
+
+void white_noise(float* out, size_t n) {
+  for (size_t i = 0; i < n; i++) {
+    out[i] = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f;
+  }
+}
+
+float hz_to_omega(float hz, float sampleRate) {
+  return 2.0f * M_PI * hz / sampleRate;
+}
+
+void apply_window_inplace(float* buffer, const float* window, size_t n) {
+  for (size_t i = 0; i < n; i++) {
+    buffer[i] *= window[i];
+  }
+}
+
+void compute_gain_reduction_db(const float* inputDb, const float* thresholdDb, float ratio, float* out, size_t numSamples) {
+  float slope = (1.0f / ratio) - 1.0f;
+  for (size_t n = 0; n < numSamples; n++) {
+    float diff = inputDb[n] - thresholdDb[n];
+    float aboveThreshold = fmaxf(0.0f, diff);
+    out[n] = slope * aboveThreshold;
+  }
+}
+
+void build_waveshaper_table(float *lookupTable, size_t tableSize, ClipperType type, float drive) {
+  if (tableSize < 2) {
+    return;
+  }
+  for (size_t i = 0; i < tableSize; i++) {
+    float x = ((float)i / (float)(tableSize - 1)) * 2.0f - 1.0f;
+    float x_driven = x * drive;
+    switch (type) {
+      case CLIP_HARD:
+        lookupTable[i] = fminf(1.0f, fmaxf(-1.0f, x_driven));
+        break;
+      case CLIP_SOFT_TANH:
+        lookupTable[i] = tanhf(x_driven);
+        break;
+      case CLIP_ARCTAN:
+        lookupTable[i] = (2.0f / M_PI) * atanf(x_driven);
+        break;
+      case CLIP_SIGMOID:
+        lookupTable[i] = (2.0f / (1.0f + expf(-x_driven))) - 1.0f;
+        break;
+      case CLIP_CUBIC_SOFT:
+        float limit = 1.0f;
+        float temp = fminf(limit, fmaxf(-limit, x_driven));
+        float result = (temp - (temp * temp * temp) / 3.0f) * 1.5f;
+        lookupTable[i] = fminf(1.0f, fmaxf(-1.0f, result));
+        break;
+      default:
+        lookupTable[i] = x;
+        break;
+    }
+  }
+}
+
+void build_hann_window(float* w, size_t n) {
+  for (size_t i = 0; i < n; i++) {
+    w[i] = 0.5f * (1.0f - cosf((2.0f * M_PI * i)/(n - 1)));
+  }
+}
+
+float ms_to_coeff(float ms, float sampleRate) {
+  ms = maxf(ms, 0.001f);
+  sampleRate = maxf(sampleRate, 1.0f);
+  float alpha = expf(-1.0f / (0.001f * ms * sampleRate));
+  return 1.0f - alpha;
+}
+
+// Scalar states, can use SIMD for parallel channels i think, think about state management here:
+
 void onepole_init(OnePole* f, float cutoffHz, float sampleRate, int isHighPass) {
   float x = expf(-2.0f * M_PI * cutoffHz / sampleRate);
   if (isHighPass) {
@@ -146,9 +246,22 @@ void biquad_process(Biquad* bq, const float* in, float* out, size_t numSamples) 
   bq->z2 = z2;
 }
 
-void hard_clip(const float* in, float threshold, float* out, size_t numSamples) {
-  for (size_t n = 0; n < numSamples; n++) {
-    float input = in[n];
-    out[n] = fminf(threshold, fmaxf(-threshold, input));
+void apply_gain_smoothing(float* currentGain, const float* targetGain, float* state, float attackCoeff, float releaseCoeff, size_t numSamples) {
+  float curr = *state;
+  float target = 0.0f;
+  // using mask: coeff = release + (is_rising)(attack - release)
+  float coeff_diff = attackCoeff - releaseCoeff;
+
+  for (size_t i = 0; i < numSamples; i++) {
+    target = targetGain[i];
+    float diff = target - curr;
+    float is_rising = (float)(diff > 0.0f);
+
+    float coeff = releaseCoeff + (is_rising)*(attackCoeff - releaseCoeff);
+
+    curr += diff * coeff;
+    currentGain[i] = curr;
   }
+  *state = curr;
 }
+
