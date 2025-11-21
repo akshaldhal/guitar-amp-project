@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <math.h>
+#include <string.h>
 #include <simde/x86/avx2.h>
 #include <logger.h>
 
@@ -23,6 +24,7 @@
 #endif
 #endif
 
+#define INF (float)INT_MAX
 
 static inline float clampf(float x, float lo, float hi) {
   return (x < lo) ? lo : (x > hi) ? hi : x;
@@ -34,7 +36,7 @@ static inline float db_to_linear(float db) {
 
 static inline float linear_to_db(float lin) {
   if (lin <= 0.0f)
-    return -INFINITY;
+    return -INF;
   return 20.0f * log10f(lin);
 }
 
@@ -204,5 +206,51 @@ void white_noise(float* out, size_t n);
 void apply_window_inplace(float* buffer, const float* window, size_t n);
 
 float hz_to_omega(float hz, float sampleRate);
+
+typedef struct {
+  DelayLine combLines[4];      // Parallel comb filters
+  AllPass1 allpassLines[2];    // Series allpass for diffusion
+  float combDamp[4];           // Damping filter state
+  float wetGain;
+  float dryGain;
+  float width;                 // Stereo width
+} SimpleReverb;
+
+void reverb_init(SimpleReverb* rev, float* bufferMemory, size_t bufferSize, float sampleRate);
+void reverb_process(SimpleReverb* rev, const float* in, float* out, size_t numSamples);
+void reverb_set_params(SimpleReverb* rev, float room, float damp, float width);
+
+
+typedef struct {
+  Biquad inputHighpass;
+  float* waveshapeTable;
+  size_t waveshapeTableSize;
+  float tubeGain;
+  Biquad toneStack[3];         // Low, Mid, High bands
+  float sagAmount;
+  float sagTimeConstant;
+  float supplyVoltage;
+  float supplyFilter;          // Sag filter state
+} TubePreamp;
+
+void tubepreamp_init(TubePreamp* preamp, float* wsTable, size_t wsTableSize, float sampleRate);
+void tubepreamp_process(TubePreamp* preamp, const float* in, float* out, size_t numSamples);
+void tubepreamp_set_gain(TubePreamp* preamp, float gainDb);
+
+
+typedef struct {
+  EnvelopeDetector detector;
+  float ratio;
+  float threshold;
+  float makeup;
+  float kneeWidth;
+  float previousGain;
+} CompressorState;
+
+void compressor_init(CompressorState* comp, float attackMs, float releaseMs, float sampleRate);
+void compressor_process(CompressorState* comp, const float* in, float* out, size_t numSamples);
+void compressor_set_params(CompressorState* comp, float threshold, float ratio, float makeup);
+
+
 
 #endif

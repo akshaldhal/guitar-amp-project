@@ -26,20 +26,20 @@ typedef enum {
 } AmpChannelType;
 
 
-typedef enum {
-  TUBE_TYPE_12AX7,   // Preamp tubes: High-gain preamp, strong saturation, bright mids
-  TUBE_TYPE_7025,    // Preamp tubes: Low-noise 12AX7 variant, cleaner, smoother
-  TUBE_TYPE_12AT7,   // Preamp tubes: Lower gain, more headroom, softer clipping
+// typedef enum {
+//   TUBE_TYPE_12AX7,   // Preamp tubes: High-gain preamp, strong saturation, bright mids
+//   TUBE_TYPE_7025,    // Preamp tubes: Low-noise 12AX7 variant, cleaner, smoother
+//   TUBE_TYPE_12AT7,   // Preamp tubes: Lower gain, more headroom, softer clipping
 
-  TUBE_TYPE_EL84,    // Power tubes (British): Vox-style chime, early breakup, bright upper mids
-  TUBE_TYPE_EL34,    // Power tubes (British): Marshall-style crunch, mid-forward, aggressive
+//   TUBE_TYPE_EL84,    // Power tubes (British): Vox-style chime, early breakup, bright upper mids
+//   TUBE_TYPE_EL34,    // Power tubes (British): Marshall-style crunch, mid-forward, aggressive
 
-  TUBE_TYPE_6V6,     // Power tubes (American): Small-amp vintage compression, warm, early breakup
-  TUBE_TYPE_6L6,     // Power tubes (American): Big clean headroom, punchy low end, smooth highs
+//   TUBE_TYPE_6V6,     // Power tubes (American): Small-amp vintage compression, warm, early breakup
+//   TUBE_TYPE_6L6,     // Power tubes (American): Big clean headroom, punchy low end, smooth highs
 
-  TUBE_TYPE_KT88,    // High-power tubes: Modern metal/bass, huge headroom, tight low end
-  TUBE_TYPE_6550     // High-power tubes: Bass/fat clean, strong lows, clean until very loud
-} TubeType;
+//   TUBE_TYPE_KT88,    // High-power tubes: Modern metal/bass, huge headroom, tight low end
+//   TUBE_TYPE_6550     // High-power tubes: Bass/fat clean, strong lows, clean until very loud
+// } TubeType;
 
 
 typedef enum {

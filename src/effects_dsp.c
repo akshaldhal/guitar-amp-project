@@ -1,6 +1,7 @@
 #include <effects_dsp.h>
 
-// implementations assumes 1 channel input and output, can be fixed upto 8 using simd
+// implementations assumes 1 channel input and output, can be fixed upto 8 using simd, add loggers in init
+// and ONLY DEBUG loggers in process
 
 // Stateless:
 
@@ -85,6 +86,9 @@ void build_waveshaper_table(float *lookupTable, size_t tableSize, ClipperType ty
   for (size_t i = 0; i < tableSize; i++) {
     float x = ((float)i / (float)(tableSize - 1)) * 2.0f - 1.0f;
     float x_driven = x * drive;
+    float limit = 1.0f;
+    float temp = fminf(limit, fmaxf(-limit, x_driven));
+    float result = (temp - (temp * temp * temp) / 3.0f) * 1.5f;
     switch (type) {
       case CLIP_HARD:
         lookupTable[i] = fminf(1.0f, fmaxf(-1.0f, x_driven));
@@ -99,9 +103,6 @@ void build_waveshaper_table(float *lookupTable, size_t tableSize, ClipperType ty
         lookupTable[i] = (2.0f / (1.0f + expf(-x_driven))) - 1.0f;
         break;
       case CLIP_CUBIC_SOFT:
-        float limit = 1.0f;
-        float temp = fminf(limit, fmaxf(-limit, x_driven));
-        float result = (temp - (temp * temp * temp) / 3.0f) * 1.5f;
         lookupTable[i] = fminf(1.0f, fmaxf(-1.0f, result));
         break;
       default:
@@ -357,7 +358,7 @@ void apply_gain_smoothing(float* currentGain, const float* targetGain, float* st
     float diff = target - curr;
     float is_rising = (float)(diff > 0.0f);
 
-    float coeff = releaseCoeff + (is_rising)*(attackCoeff - releaseCoeff);
+    float coeff = releaseCoeff + (is_rising)*(coeff_diff);
 
     curr += diff * coeff;
     currentGain[i] = curr;
@@ -709,6 +710,14 @@ void normalize_ir(float* ir, size_t n, float targetRMS) {
   }
 }
 
+
+
+
+
+
+
+// These compute stuff right now, use pre comuted tables later (IF YOU WANT):
+// Also these are kinda AI generated formulas/comments, need a deeper review
 void build_triode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax) {
   if (table == NULL || tableSize == 0 || params == NULL) return;
   for (size_t i = 0; i < tableSize; i++) {
@@ -756,3 +765,220 @@ void build_tube_table_from_koren(float* table, size_t tableSize, TubeType type, 
   }
 }
 
+// More stuff ofc, not thoroughly checked:
+
+void reverb_init(SimpleReverb* rev, float* bufferMemory, size_t bufferSize, float sampleRate) {
+  const size_t comb_sizes[4] = {1116, 1188, 1277, 1356};
+  size_t offset = 0;
+  for (int i = 0; i < 4; i++) {
+    size_t delayBytes = comb_sizes[i] * sizeof(float);
+    if (offset + delayBytes > bufferSize) {
+      log_message(LOG_LEVEL_ERROR, "Reverb buffer overflow at comb filter %d", i);
+      return;
+    }
+    delayline_init(&rev->combLines[i], bufferMemory + offset, comb_sizes[i], sampleRate);
+    offset += comb_sizes[i];
+  }
+  for (int i = 0; i < 2; i++) {
+    allpass1_init(&rev->allpassLines[i], 0.5f);
+  }
+  for (int i = 0; i < 4; i++) {
+    rev->combDamp[i] = 0.0f;
+  }
+  
+  rev->wetGain = 0.3f;
+  rev->dryGain = 0.4f;
+  rev->width = 1.0f;
+}
+
+void reverb_process(SimpleReverb* rev, const float* in, float* out, size_t numSamples) {
+  float* temp_comb = (float*)malloc(numSamples * sizeof(float));
+  float* temp_wet = (float*)malloc(numSamples * sizeof(float));
+  
+  memset(temp_wet, 0, numSamples * sizeof(float));
+  for (int i = 0; i < 4; i++) {
+    memset(temp_comb, 0, numSamples * sizeof(float));
+    for (size_t j = 0; j < numSamples; j++) {
+      float delayed = 0.0f;
+      delayline_read_linear(&rev->combLines[i], &delayed, 1, (float)rev->combLines[i].size - 1.0f);
+      float damp_coeff = 0.5f;
+      rev->combDamp[i] = delayed * damp_coeff + rev->combDamp[i] * (1.0f - damp_coeff);
+      float feedback = rev->combDamp[i] * 0.84f;
+      temp_comb[j] = in[j] + feedback;
+      
+      delayline_write(&rev->combLines[i], &temp_comb[j], 1);
+    }
+    for (size_t j = 0; j < numSamples; j++) {
+      temp_wet[j] += temp_comb[j];
+    }
+  }
+
+  float* temp_ap = temp_wet;
+  for (int i = 0; i < 2; i++) {
+    float* temp_ap_out = (float*)malloc(numSamples * sizeof(float));
+    allpass1_process(&rev->allpassLines[i], temp_ap, temp_ap_out, numSamples);
+    if (i > 0) free(temp_ap);
+    temp_ap = temp_ap_out;
+  }
+  
+  for (size_t i = 0; i < numSamples; i++) {
+    float wet_sig = temp_ap[i] * rev->wetGain;
+    float dry_sig = in[i] * rev->dryGain;
+    float width_mix = wet_sig * rev->width + wet_sig * (1.0f - rev->width) * 0.5f;
+    out[i] = clampf(dry_sig + width_mix, -1.0f, 1.0f);
+  }
+  
+  free(temp_comb);
+  free(temp_wet);
+  free(temp_ap);
+}
+
+void reverb_set_params(SimpleReverb* rev, float room, float damp, float width) {
+  
+  room = clampf(room, 0.0f, 1.0f);
+  damp = clampf(damp, 0.0f, 1.0f);
+  width = clampf(width, 0.0f, 1.0f);
+  
+  rev->wetGain = room * 0.6f + 0.2f;
+  rev->width = width;
+  for (int i = 0; i < 4; i++) {
+    rev->combDamp[i] = damp * 0.4f + 0.1f;
+  }
+}
+
+
+void tubepreamp_init(TubePreamp* preamp, float* wsTable, size_t wsTableSize, float sampleRate) {
+  biquad_init(&preamp->inputHighpass, BQ_HPF, 20.0f, 0.707f, 0.0f, sampleRate);
+  
+  preamp->waveshapeTable = wsTable;
+  preamp->waveshapeTableSize = wsTableSize;
+  preamp->tubeGain = 1.0f;
+  
+  // Tone stack: 3-band EQ (Low, Mid, High)
+  biquad_init(&preamp->toneStack[0], BQ_LOWSHELF, 80.0f, 0.707f, 0.0f, sampleRate);
+  biquad_init(&preamp->toneStack[1], BQ_PEAK, 500.0f, 1.0f, 0.0f, sampleRate);
+  biquad_init(&preamp->toneStack[2], BQ_HIGHSHELF, 8000.0f, 0.707f, 0.0f, sampleRate);
+  
+  preamp->sagAmount = 0.1f;
+  preamp->sagTimeConstant = 0.05f;
+  preamp->supplyVoltage = 1.0f;
+  preamp->supplyFilter = 1.0f;
+}
+
+void tubepreamp_process(TubePreamp* preamp, const float* in, float* out, size_t numSamples) {
+  float* temp = (float*)malloc(numSamples * sizeof(float));
+  
+  biquad_process(&preamp->inputHighpass, in, temp, numSamples);
+
+  for (size_t i = 0; i < numSamples; i++) {
+    temp[i] *= preamp->tubeGain;
+  }
+  
+  float sag_coeff = ms_to_coeff(preamp->sagTimeConstant * 1000.0f, 44100.0f);
+  for (size_t i = 0; i < numSamples; i++) {
+    float input_level = fabsf(temp[i]);
+    float sag_amount = input_level * preamp->sagAmount;
+    preamp->supplyFilter += (sag_amount - preamp->supplyFilter) * sag_coeff;
+    preamp->supplyVoltage = 1.0f - clampf(preamp->supplyFilter, 0.0f, 0.3f);
+    temp[i] *= preamp->supplyVoltage;
+  }
+  
+  if (preamp->waveshapeTable && preamp->waveshapeTableSize > 0) {
+    waveshaper_lookup_cubic(temp, temp, preamp->waveshapeTable, 
+                            preamp->waveshapeTableSize, numSamples);
+  }
+  
+  biquad_process(&preamp->toneStack[0], temp, temp, numSamples);
+  biquad_process(&preamp->toneStack[1], temp, temp, numSamples);
+  biquad_process(&preamp->toneStack[2], temp, temp, numSamples);
+  
+  for (size_t i = 0; i < numSamples; i++) {
+    out[i] = clampf(temp[i], -1.0f, 1.0f);
+  }
+  
+  free(temp);
+}
+
+void tubepreamp_set_gain(TubePreamp* preamp, float gainDb) {
+  preamp->tubeGain = db_to_linear(clampf(gainDb, -12.0f, 48.0f));
+}
+
+
+
+void compressor_init(CompressorState* comp, float attackMs, float releaseMs, float sampleRate) {
+  env_init(&comp->detector, attackMs, releaseMs, sampleRate, 1);  // RMS detection
+  comp->ratio = 4.0f;
+  comp->threshold = -20.0f;
+  comp->makeup = 0.0f;
+  comp->kneeWidth = 0.0f;  // 0 = hard knee
+  comp->previousGain = 1.0f;
+}
+
+void compressor_process(CompressorState* comp, const float* in, float* out, size_t numSamples) {
+  float* inputDb = (float*)malloc(numSamples * sizeof(float));
+  float* gainReduction = (float*)malloc(numSamples * sizeof(float));
+  float* smoothedGain = (float*)malloc(numSamples * sizeof(float));
+  float* thresholdDb = (float*)malloc(numSamples * sizeof(float));
+  
+  // Convert input to dB
+  for (size_t i = 0; i < numSamples; i++) {
+    float level = fabsf(in[i]) + EPSILON_F;
+    inputDb[i] = linear_to_db(level);
+  }
+  
+  // Fill threshold array
+  for (size_t i = 0; i < numSamples; i++) {
+    thresholdDb[i] = comp->threshold;
+  }
+  
+  // Compute gain reduction with soft knee if enabled
+  if (comp->kneeWidth > EPSILON_F) {
+    float knee_low = comp->threshold - comp->kneeWidth * 0.5f;
+    float knee_high = comp->threshold + comp->kneeWidth * 0.5f;
+    
+    for (size_t i = 0; i < numSamples; i++) {
+      float input = inputDb[i];
+      
+      if (input < knee_low) {
+        gainReduction[i] = 0.0f;
+      } else if (input > knee_high) {
+        float excess = input - comp->threshold;
+        gainReduction[i] = excess * (1.0f - 1.0f / comp->ratio);
+      } else {
+        // Soft knee interpolation
+        float knee_t = (input - knee_low) / comp->kneeWidth;
+        float knee_t_sq = knee_t * knee_t;
+        float soft_ratio = 1.0f + (comp->ratio - 1.0f) * knee_t_sq;
+        float excess = input - comp->threshold + comp->kneeWidth * 0.5f;
+        gainReduction[i] = excess * (1.0f - 1.0f / soft_ratio);
+      }
+    }
+  } else {
+    // Hard knee
+    compute_gain_reduction_db(inputDb, thresholdDb, comp->ratio, gainReduction, numSamples);
+  }
+  
+  // Smooth gain reduction
+  float attackCoeff = ms_to_coeff(10.0f, 44100.0f);  // Fast attack for visualization
+  float releaseCoeff = ms_to_coeff(100.0f, 44100.0f);
+  apply_gain_smoothing(smoothedGain, gainReduction, &comp->previousGain, 
+                       attackCoeff, releaseCoeff, numSamples);
+  
+  // Convert gain reduction back to linear and apply makeup gain
+  float makeupLinear = db_to_linear(comp->makeup);
+  for (size_t i = 0; i < numSamples; i++) {
+    float gainLin = db_to_linear(-smoothedGain[i]) * makeupLinear;
+    out[i] = in[i] * gainLin;
+  }
+  
+  free(inputDb);
+  free(gainReduction);
+  free(smoothedGain);
+  free(thresholdDb);
+}
+
+void compressor_set_params(CompressorState* comp, float threshold, float ratio, float makeup) {
+  comp->threshold = clampf(threshold, -60.0f, 0.0f);
+  comp->ratio = clampf(ratio, 1.0f, 20.0f);
+  comp->makeup = clampf(makeup, -24.0f, 24.0f);
+}
