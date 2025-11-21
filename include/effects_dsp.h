@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <math.h>
 #include <simde/x86/avx2.h>
+#include <logger.h>
 
 #ifndef SIMD_WIDTH
 #ifdef __AVX512F__
@@ -161,10 +162,17 @@ void waveshaper_lookup(const float* in, float* out, const float* lookupTable, si
 void waveshaper_lookup_linear(const float* in, float* out, const float* lookupTable, size_t tableSize, size_t numSamples);
 void waveshaper_lookup_cubic(const float* in, float* out, const float* lookupTable, size_t tableSize, size_t numSamples);
 
-void oversample2x(const float* in, float* out, size_t inLen);
-void oversample2x_fir(const float* in, float* out, size_t inLen, const float* fir, size_t firLen);
-void downsample2x(const float* in, float* out, size_t inLen);
-void downsample2x_fir(const float* in, float* out, size_t inLen, const float* fir, size_t firLen);
+typedef struct {
+  float* history;
+  size_t historySize;
+} ResamplerState;
+
+void resampler_init(ResamplerState* rs, float* historyBuffer, size_t firLen);
+void design_resampler_fir(float* fir, size_t numTaps, float gain);
+void oversample2x_linear(const float* in, float* out, size_t n, float* state);
+void oversample2x_fir(const float* in, float* out, size_t n, const float* fir, ResamplerState* state);
+void downsample2x(const float* in, float* out, size_t n);
+void downsample2x_fir(const float* in, float* out, size_t n, const float* fir, ResamplerState* state);
 
 void denormal_fix_inplace(float* buffer, size_t n);
 
@@ -187,6 +195,7 @@ void build_pentode_table(float* table, size_t tableSize, const TubeParams* param
 void build_tube_table_from_koren(float* table, size_t tableSize, TubeType type, const TubeParams* params, float vMin, float vMax);
 
 void normalize_ir(float* ir, size_t n, float targetRMS);
+float blackman_window_scalar(float w, size_t n);
 void build_blackman_window(float* w, size_t n);
 void build_hann_window(float* w, size_t n);
 

@@ -572,3 +572,129 @@ void delayline_read_cubic(DelayLine* dl, float* out, size_t numSamples, float de
   }
 }
 
+
+// Idk if these are SIMD friendly, I didn't pay attention too much, check again, they're probably not:
+
+void resampler_init(ResamplerState* rs, float* historyBuffer, size_t firLen) {
+  if (firLen < 2) {
+    log_message(LOG_LEVEL_ERROR, "firLen cannot be less than 2, not initializing ResamplerState");
+  }
+  rs->history = historyBuffer;
+  rs->historySize = firLen;
+  if (rs->history != NULL && rs->historySize > 0) {
+    memset(rs->history, 0, rs->historySize * sizeof(float));
+  }
+}
+
+void design_resampler_fir(float* fir, size_t numTaps, float gain) {
+  if (fir == NULL || numTaps == 0) return;
+  const float cutoffNorm = 0.24f; 
+  const float center = (float)(numTaps - 1) * 0.5f;
+  const float two_pi_cutoff = 2.0f * M_PI * cutoffNorm;
+  float sum = 0.0f;
+  for (size_t i = 0; i < numTaps; i++) {
+    float n = (float)i - center;
+    float sinc;
+    if (fabsf(n) < 1e-5f) {
+      sinc = 1.0f; 
+    } else {
+      float arg = two_pi_cutoff * n; 
+      sinc = sinf(arg) / (M_PI * n);
+    }
+    float window = blackman_window_scalar((float)i, numTaps);
+    fir[i] = sinc * window;
+    sum += fir[i];
+  }
+  if (fabsf(sum) > 1e-9f) {
+    float scale = gain / sum;
+    for (size_t i = 0; i < numTaps; i++) {
+      fir[i] *= scale;
+    }
+  }
+}
+
+void oversample2x_linear(const float* in, float* out, size_t n, float* state) {
+  size_t j = 0;
+  for (size_t i = 0; i < n - 1; i++) {
+    float x0 = in[i];
+    float x1 = in[i + 1];
+    out[j++] = x0;
+    out[j++] = 0.5f * (x0 + x1);
+  }
+  float last = in[n - 1];
+  out[j++] = last;
+  out[j++] = last; 
+  *state = last;
+}
+
+void oversample2x_fir(const float* in, float* out, size_t n, const float* fir, ResamplerState* state) {
+  size_t firLen = state->historySize;
+  size_t halfLen = firLen / 2;
+  float* history = state->history;
+  for (size_t i = 0; i < n; i++) {
+    float input = in[i];
+    memmove(&history[0], &history[1], (halfLen - 1) * sizeof(float));
+    history[halfLen - 1] = input;
+    float accEven = 0.0f;
+    float accOdd  = 0.0f;
+    for (size_t k = 0; k < halfLen; k++) {
+      float histVal = history[halfLen - 1 - k];
+      accEven += histVal * fir[2 * k];
+      accOdd  += histVal * fir[2 * k + 1];
+    }
+    out[2 * i] = accEven;
+    out[2 * i + 1] = accOdd;
+  }
+}
+
+void downsample2x(const float* in, float* out, size_t n) {
+  size_t outLen = n / 2;
+  for (size_t i = 0; i < outLen; i++) {
+    out[i] = in[2 * i];
+  }
+}
+
+void downsample2x_fir(const float* in, float* out, size_t n, const float* fir, ResamplerState* state) {
+  if (n < 2) return;
+  float* history = state->history;
+  size_t firLen = state->historySize;
+  size_t outLen = n / 2;
+  for (size_t i = 0; i < outLen; i++) {
+    memmove(&history[0], &history[2], (firLen - 2) * sizeof(float));
+    history[firLen - 2] = in[2 * i];
+    history[firLen - 1] = in[2 * i + 1];
+    float acc = 0.0f;
+    for (size_t k = 0; k < firLen; k++) {
+      acc += history[firLen - 1 - k] * fir[k];
+    }
+    out[i] = acc;
+  }
+}
+
+void denormal_fix_inplace(float* buffer, size_t n) {
+  const float DENORMAL_THRESHOLD = 1.0e-24f;
+  for (size_t i = 0; i < n; i++) {
+    buffer[i] *= (fabsf(buffer[i]) >= DENORMAL_THRESHOLD);
+  }
+}
+
+float blackman_window_scalar(float w, size_t n) {
+  float N = (float)n;
+  const float alpha = 0.16f;
+  const float a0 = (1.0f - alpha) / 2.0f;
+  const float a1 = 0.5f;
+  const float a2 = alpha / 2.0f;
+  return a0 - a1 * cosf((2.0f * M_PI * w) / (N - 1)) + a2 * cosf((4.0f * M_PI * w) / (N - 1));
+}
+
+void build_blackman_window(float* w, size_t n) {
+  for (size_t i = 0; i < n; i++)
+  {
+    w[i] = blackman_window_scalar((float)i, n);
+  }
+}
+
+void build_triode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax);
+void build_pentode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax);
+void build_tube_table_from_koren(float* table, size_t tableSize, TubeType type, const TubeParams* params, float vMin, float vMax);
+void normalize_ir(float* ir, size_t n, float targetRMS);
