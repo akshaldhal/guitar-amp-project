@@ -32,7 +32,8 @@ static inline float db_to_linear(float db) {
 }
 
 static inline float linear_to_db(float lin) {
-  if (lin <= 0.0f) return -INFINITY;
+  if (lin <= 0.0f)
+    return -INFINITY;
   return 20.0f * log10f(lin);
 }
 
@@ -49,10 +50,12 @@ typedef struct {
   float b0;
   float b1;
   float z1;
+  int isHighPass;
 } OnePole;
 
 void onepole_init(OnePole* f, float cutoffHz, float sampleRate, int isHighPass);
 void onepole_process(OnePole* f, const float* in, float* out, size_t numSamples);
+void onepole_set_cutoff(OnePole* f, float cutoffHz, float sampleRate);
 
 typedef enum {
   BQ_LPF,
@@ -72,17 +75,20 @@ typedef struct {
 
 void biquad_init(Biquad* bq, BiquadType type, float freqHz, float Q, float gainDb, float sampleRate);
 void biquad_process(Biquad* bq, const float* in, float* out, size_t numSamples);
+void biquad_process_inplace(Biquad* bq, float* buffer, size_t numSamples);
+void biquad_set_params(Biquad* bq, BiquadType type, float freqHz, float Q, float gainDb, float sampleRate);
 
 typedef struct {
-  float a;
-  float z1;
+  float g;
+  float x_prev;
+  float y_prev;
 } AllPass1;
 
-void allpass1_init(AllPass1* ap, float delaySamples, float feedback);
+void allpass1_init(AllPass1* ap, float feedback);
 void allpass1_process(AllPass1* ap, const float* in, float* out, size_t numSamples);
 
 typedef struct {
-  float *buffer;
+  float* buffer;
   size_t size;
   size_t writeIndex;
   float sampleRate;
@@ -91,10 +97,13 @@ typedef struct {
 void delayline_init(DelayLine* dl, float* bufferMemory, size_t size, float sampleRate);
 void delayline_write(DelayLine* dl, const float* samples, size_t numSamples);
 void delayline_read_linear(DelayLine* dl, float* out, size_t numSamples, float delaySamples);
-void delayline_read_cubic(DelayLine* dl, float* out, size_t numSamples, float delaySamples);
+void delayline_read_cubic(DelayLine* dl, float* out, size_t numSamples, float delaySamples);;
 
+static inline float lerp_scalar(float a, float b, float t);
 void lerp(const float* a, const float* b, const float* t, float* out, size_t numSamples);
+static inline float cubic_interp_scalar(float ym1, float y0, float y1, float y2, float t);
 void cubic_interp(const float* ym1, const float* y0, const float* y1, const float* y2, const float* t, float* out, size_t numSamples);
+void crossfade(const float* a, const float* b, const float* t, float* out, size_t numSamples);
 
 typedef enum {
   LFO_SINE,
@@ -116,6 +125,7 @@ typedef struct {
 
 void lfo_init(LFO* lfo, LFOType type, float freqHz, float amp, float dc, float sampleRate);
 void lfo_process(LFO* lfo, float* out, size_t numSamples);
+void lfo_set_freq(LFO* lfo, float freqHz);
 
 typedef struct {
   float env;
@@ -146,78 +156,38 @@ void hard_clip(const float* in, float threshold, float* out, size_t numSamples);
 void tanh_clip(const float* in, float drive, float* out, size_t numSamples);
 void arctan_clip(const float* in, float drive, float* out, size_t numSamples);
 
-void build_waveshaper_table(float *lookupTable, size_t tableSize, ClipperType type, float drive);
-
+void build_waveshaper_table(float* lookupTable, size_t tableSize, ClipperType type, float drive);
 void waveshaper_lookup(const float* in, float* out, const float* lookupTable, size_t tableSize, size_t numSamples);
+void waveshaper_lookup_linear(const float* in, float* out, const float* lookupTable, size_t tableSize, size_t numSamples);
+void waveshaper_lookup_cubic(const float* in, float* out, const float* lookupTable, size_t tableSize, size_t numSamples);
 
-void oversample2x(const float *in, float *out, size_t inLen);
-void downsample2x(const float *in, float *out, size_t inLen);
+void oversample2x(const float* in, float* out, size_t inLen);
+void oversample2x_fir(const float* in, float* out, size_t inLen, const float* fir, size_t firLen);
+void downsample2x(const float* in, float* out, size_t inLen);
+void downsample2x_fir(const float* in, float* out, size_t inLen, const float* fir, size_t firLen);
 
-typedef struct {
-  float *combBuffers;
-  size_t *combSizes;
-  size_t numCombs;
-  float *combFeedbacks;
-  float *apBuffer;
-  size_t *apSizes;
-  size_t numAP;
-  float wet;
-  float dry;
-  float sampleRate;
-} SimpleReverb;
+void denormal_fix_inplace(float* buffer, size_t n);
 
-void reverb_init(SimpleReverb* r, float sampleRate, float wet, float dry);
-void reverb_process(SimpleReverb* r, const float* in, float* out, size_t numSamples);
+typedef enum {
+  TUBE_TRIODE,
+  TUBE_PENTODE
+} TubeType;
 
 typedef struct {
-  DelayLine dl;
-  float feedback;
-} CombFilter;
+  float mu;
+  float k;
+  float a;
+  float Kg1;
+  float Rp;
+  float biasV;
+} TubeParams;
 
-void comb_init(CombFilter* cf, float* bufferMemory, size_t bufferSize, float feedback, float sampleRate);
-void comb_process(CombFilter* cf, const float* in, float* out, size_t numSamples);
+void build_triode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax);
+void build_pentode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax);
+void build_tube_table_from_koren(float* table, size_t tableSize, TubeType type, const TubeParams* params, float vMin, float vMax);
 
-typedef struct {
-  float **partitions;
-  float **fftBuffers;
-  size_t partitionSize;
-  size_t numPartitions;
-  size_t currentPartition;
-  size_t irLength;
-  float *irBuffer;
-  size_t irBufferSize;
-  float *overlapBuffer;
-  size_t overlapSize;
-  float sampleRate;
-  int irSampleRate;
-  float dryMix;
-  float wetMix;
-  int isActive;
-} Convolver;
-
-int convolver_init(Convolver* conv, float sampleRate, size_t partitionSize, size_t maxIrLength);
-int convolver_set_ir(Convolver* conv, const float* irData, size_t irLength, int irSampleRate);
-void convolver_process(Convolver* conv, const float* in, float* out, size_t numSamples);
-size_t convolver_get_latency_samples(const Convolver* conv);
-void convolver_set_mix(Convolver* conv, float dryDb, float wetDb);
-void convolver_reset(Convolver* conv);
-void convolver_destroy(Convolver* conv);
-
-int fft_init(int size);
-int fft_forward(const float* timeBuf, float* freqBuf, int size);
-int fft_inverse(const float* freqBuf, float* timeBuf, int size);
-
-typedef struct {
-  DelayLine dl;
-  float *window;
-  size_t windowSize;
-  float hop;
-  float sampleRate;
-} GranularPS;
-
-void granular_init(GranularPS* ps, float* bufferMemory, size_t bufferSize, float* windowMemory, size_t windowSize, float hop, float sampleRate);
-void granular_process(GranularPS* ps, const float* in, float* out, size_t numSamples, float pitchRatio);
-
+void normalize_ir(float* ir, size_t n, float targetRMS);
+void build_blackman_window(float* w, size_t n);
 void build_hann_window(float* w, size_t n);
 
 void white_noise(float* out, size_t n);
@@ -225,10 +195,5 @@ void white_noise(float* out, size_t n);
 void apply_window_inplace(float* buffer, const float* window, size_t n);
 
 float hz_to_omega(float hz, float sampleRate);
-
-static inline float ms_to_coef(float ms, float sampleRate) {
-  if (ms <= 0.0f) return 0.0f;
-  return expf(-1.0f / ((ms * 0.001f) * sampleRate));
-}
 
 #endif
