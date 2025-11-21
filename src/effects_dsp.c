@@ -694,7 +694,65 @@ void build_blackman_window(float* w, size_t n) {
   }
 }
 
-void build_triode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax);
-void build_pentode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax);
-void build_tube_table_from_koren(float* table, size_t tableSize, TubeType type, const TubeParams* params, float vMin, float vMax);
-void normalize_ir(float* ir, size_t n, float targetRMS);
+void normalize_ir(float* ir, size_t n, float targetRMS) {
+  if (ir == NULL || n == 0 || targetRMS < 1e-9f) return;
+  float sum_sq = 0.0f;
+  for (size_t i = 0; i < n; i++) {
+    sum_sq += ir[i] * ir[i];
+  }
+  float currentRMS = sqrtf(sum_sq / (float)n);
+  if (currentRMS > 1e-9f) {
+    float scale = targetRMS / currentRMS;
+    for (size_t i = 0; i < n; i++) {
+      ir[i] *= scale;
+    }
+  }
+}
+
+void build_triode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax) {
+  if (table == NULL || tableSize == 0 || params == NULL) return;
+  for (size_t i = 0; i < tableSize; i++) {
+    float v = vMin + (vMax - vMin) * (float)i / (float)(tableSize - 1);
+    float vgs = v - params->biasV;
+    float vgs_sq = vgs * vgs;
+    float denominator = params->Rp + params->k * (params->mu + 1.0f) * (vgs + sqrtf(vgs_sq + params->a));
+    if (fabsf(denominator) > 1e-9f) {
+      table[i] = ((params->mu + 1.0f) * vgs) / denominator;
+    } else {
+      table[i] = 0.0f;
+    }
+    table[i] = fmaxf(table[i], 0.0f);
+  }
+}
+
+void build_pentode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax) {
+  if (table == NULL || tableSize == 0 || params == NULL) return;
+  for (size_t i = 0; i < tableSize; i++) {
+    float v = vMin + (vMax - vMin) * (float)i / (float)(tableSize - 1);
+    float vgs = v - params->biasV;
+    float vgs_sq = vgs * vgs;
+    float denominator = params->Rp + params->k * (params->mu + 1.0f) * (vgs + sqrtf(vgs_sq + params->a));
+    float g1_factor = 1.0f + params->Kg1 * vgs;
+    if (fabsf(denominator) > 1e-9f) {
+      table[i] = (((params->mu + 1.0f) * vgs) / denominator) * g1_factor;
+    } else {
+      table[i] = 0.0f;
+    }
+    table[i] = fmaxf(table[i], 0.0f);
+  }
+}
+
+void build_tube_table_from_koren(float* table, size_t tableSize, TubeType type, const TubeParams* params, float vMin, float vMax) {
+  if (table == NULL || tableSize == 0 || params == NULL) return;
+  switch (type) {
+    case TUBE_TRIODE:
+      build_triode_table(table, tableSize, params, vMin, vMax);
+      break;
+    case TUBE_PENTODE:
+      build_pentode_table(table, tableSize, params, vMin, vMax);
+      break;
+    default:
+      break;
+  }
+}
+
