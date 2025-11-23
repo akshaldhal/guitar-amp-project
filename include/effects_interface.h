@@ -1,298 +1,326 @@
-#ifndef EFFECTS_HANDLER_H
-#define EFFECTS_HANDLER_H
+#ifndef EFFECTS_INTERFACE_H
+#define EFFECTS_INTERFACE_H
 
-#include <effects_dsp.h>
-#include <math.h>
-#include <logger.h>
+#include "effects_dsp.h"
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
 
-// FIXME TO USE STRUCTS FROM effects_dsp.h INSTEAD OF REDEFINING HERE!!!
+typedef struct {
+  EnvelopeDetector detector;
+  float threshold;
+  float holdSamples;
+  float holdCounter;
+  float attenuation;
+  bool enabled;
+} NoiseGate;
 
-typedef enum {
-  AMP_CHANNEL_CLEAN,         // Clean channels: Very low gain, high headroom, wide bandwidth
-  AMP_CHANNEL_FAT_CLEAN,     // Clean channels: More low mids, slightly earlier breakup
-
-  AMP_CHANNEL_CRUNCH,        // Edge of breakup / light crunch: Classic crunch, warm mids, soft clipping
-  AMP_CHANNEL_PLEXI,         // Edge of breakup / light crunch: British crunch, bright top, dynamic response
-
-  AMP_CHANNEL_LEAD,          // Lead channels: Saturated mids, smooth sustain, tight bass
-  AMP_CHANNEL_HOT_ROD_LEAD,  // Lead channels: Hot-rodded Marshall / Soldano style lead
-
-  AMP_CHANNEL_HIGH_GAIN,     // High gain: Modern high gain, tight lows, scooped mids
-  AMP_CHANNEL_METAL,         // High gain: Heavy saturation, extended lows, aggressive mids
-  AMP_CHANNEL_DJENT,         // High gain: Ultra-tight, low-end filtered, percussive gating
-
-  AMP_CHANNEL_BASS_CLEAN,    // Bass amps: Wide bandwidth, very high headroom
-  AMP_CHANNEL_BASS_DRIVE     // Bass amps: Tube-like saturation, thick low mids
-} AmpChannelType;
+void noisegate_init(NoiseGate* ng, float thresholdDb, float attackMs, float releaseMs, float holdMs, float sampleRate);
+void noisegate_process(NoiseGate* ng, const float* in, float* out, size_t numSamples);
+void noisegate_set_threshold(NoiseGate* ng, float thresholdDb);
+void noisegate_set_enabled(NoiseGate* ng, bool enabled);
 
 
-// typedef enum {
-//   TUBE_TYPE_12AX7,   // Preamp tubes: High-gain preamp, strong saturation, bright mids
-//   TUBE_TYPE_7025,    // Preamp tubes: Low-noise 12AX7 variant, cleaner, smoother
-//   TUBE_TYPE_12AT7,   // Preamp tubes: Lower gain, more headroom, softer clipping
+typedef struct {
+  float drive;
+  float* waveshapeTable;
+  size_t waveshapeTableSize;
+  Biquad toneFilter;
+  float outputGain;
+  float inputGain;
+  bool enabled;
+} Overdrive;
 
-//   TUBE_TYPE_EL84,    // Power tubes (British): Vox-style chime, early breakup, bright upper mids
-//   TUBE_TYPE_EL34,    // Power tubes (British): Marshall-style crunch, mid-forward, aggressive
-
-//   TUBE_TYPE_6V6,     // Power tubes (American): Small-amp vintage compression, warm, early breakup
-//   TUBE_TYPE_6L6,     // Power tubes (American): Big clean headroom, punchy low end, smooth highs
-
-//   TUBE_TYPE_KT88,    // High-power tubes: Modern metal/bass, huge headroom, tight low end
-//   TUBE_TYPE_6550     // High-power tubes: Bass/fat clean, strong lows, clean until very loud
-// } TubeType;
-
-
-typedef enum {
-  MIC_TYPE_DYNAMIC_SM57,     // Dynamic mic: Standard guitar cab mic: mid bump, tight lows
-  MIC_TYPE_DYNAMIC_MD421,    // Dynamic mic: Fuller low mids, smoother top end
-
-  MIC_TYPE_CONDENSER_U87,    // Condenser mic: Studio condenser, wide bandwidth, balanced
-  MIC_TYPE_CONDENSER_C414,   // Condenser mic: Bright condenser, crisp highs
-
-  MIC_TYPE_RIBBON_R121,      // Ribbon mic: Dark, smooth, classic cab IR pairing
-  MIC_TYPE_RIBBON_R122       // Ribbon mic: Slightly brighter active ribbon
-} MicType;
-
-typedef enum {
-  MIC_POSITION_ON_AXIS,      // Mic pointed directly at center of speaker cone
-  MIC_POSITION_OFF_AXIS_45,  // Mic angled 45 degrees off center
-  MIC_POSITION_OFF_AXIS_90   // Mic angled 90 degrees off center
-} MicPosition;
-
-typedef enum {
-  WAVEFORM_SINE,
-  WAVEFORM_TRIANGLE,
-  WAVEFORM_SAWTOOTH,
-  WAVEFORM_SQUARE,
-  WAVEFORM_RANDOM
-} WaveformType;
+void overdrive_init(Overdrive* od, float* wsTable, size_t wsTableSize, float sampleRate);
+void overdrive_process(Overdrive* od, const float* in, float* out, size_t numSamples);
+void overdrive_set_params(Overdrive* od, float driveDb, float toneFreq, float outputDb);
+void overdrive_set_enabled(Overdrive* od, bool enabled);
 
 
-/**
- * Apply noise gate effect to audio buffer
- * @param threshold Threshold level in dB
- * @param attackTime Attack time in milliseconds
- * @param releaseTime Release time in milliseconds
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_noise_gate(float threshold, float attackTime, float releaseTime, float* buffer, int bufferSize);
+typedef struct {
+  float drive;
+  float* waveshapeTable;
+  size_t waveshapeTableSize;
+  Biquad lowcut;
+  Biquad highcut;
+  float outputGain;
+  bool enabled;
+} Distortion;
 
-/**
- * Apply overdrive effect to audio buffer
- * @param gain Gain level
- * @param tone Tone control
- * @param level Output level
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_overdrive(float gain, float tone, float level, float* buffer, int bufferSize);
+void distortion_init(Distortion* dist, float* wsTable, size_t wsTableSize, float sampleRate);
+void distortion_process(Distortion* dist, const float* in, float* out, size_t numSamples);
+void distortion_set_params(Distortion* dist, float driveDb, float outputDb);
+void distortion_set_enabled(Distortion* dist, bool enabled);
 
-/**
- * Apply distortion effect to audio buffer
- * @param gain Gain level
- * @param tone Tone control
- * @param level Output level
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_distortion(float gain, float tone, float level, float* buffer, int bufferSize);
 
-/**
- * Apply fuzz effect to audio buffer
- * @param gain Gain level
- * @param tone Tone control
- * @param bias Bias control
- * @param gate Gate threshold
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_fuzz(float gain, float tone, float bias, float gate, float* buffer, int bufferSize);
+typedef struct {
+  float fuzz;
+  float bias;
+  float* waveshapeTable;
+  size_t waveshapeTableSize;
+  float outputGain;
+  bool enabled;
+} Fuzz;
 
-/**
- * Apply 3-band EQ effect to audio buffer
- * @param bass Gain for bass band in dB
- * @param mid Gain for mid band in dB
- * @param treble Gain for treble band in dB
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_3band_eq(float bass, float mid, float treble, float* buffer, int bufferSize);
+void fuzz_init(Fuzz* fz, float* wsTable, size_t wsTableSize, float sampleRate);
+void fuzz_process(Fuzz* fz, const float* in, float* out, size_t numSamples);
+void fuzz_set_params(Fuzz* fz, float fuzzAmount, float bias, float outputDb);
+void fuzz_set_enabled(Fuzz* fz, bool enabled);
 
-/**
- * Apply High/Low-pass filter to audio buffer
- * @param cutoffFreq Cutoff frequency in Hz
- * @param resonance Resonance/Q factor
- * @param isHighPass 1 for high-pass, 0 for low-pass
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_high_low_pass_filter(float cutoffFreq, float resonance, int isHighPass, float* buffer, int bufferSize);
 
-/**
- * Apply compressor effect to audio buffer
- * @param threshold Threshold level in dB
- * @param ratio Compression ratio
- * @param attackTime Attack time in milliseconds
- * @param releaseTime Release time in milliseconds
- * @param makeupGain Make-up gain in dB
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_compressor(float threshold, float ratio, float attackTime, float releaseTime, float makeupGain, float* buffer, int bufferSize);
+typedef struct {
+  ClipperType type;
+  float threshold;
+  float drive;
+  bool enabled;
+} Clipper;
 
-/**
- * Apply reverb effect to audio buffer
- * @param roomSize Size of the virtual room
- * @param damping Damping factor
- * @param preDelay Pre-delay time in milliseconds
- * @param mix Wet/Dry mix percentage
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_reverb(float roomSize, float damping, float preDelay, float mix, float* buffer, int bufferSize);
+void clipper_init(Clipper* clip, ClipperType type, float threshold);
+void clipper_process(Clipper* clip, const float* in, float* out, size_t numSamples);
+void clipper_set_params(Clipper* clip, float threshold, float drive);
+void clipper_set_enabled(Clipper* clip, bool enabled);
 
-/**
- * Apply delay effect to audio buffer
- * @param time Delay time in milliseconds
- * @param feedback Feedback amount percentage
- * @param mix Wet/Dry mix percentage
- * @param lowpassCutoff Low-pass filter cutoff frequency in Hz
- * @param wowFlutter Amount of wow/flutter effect
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_delay(float time, float feedback, float mix, float lowpassCutoff, float wowFlutter, float* buffer, int bufferSize);
 
-/**
- * Apply preamp simulation effect to audio buffer
- * @param gain Gain level
- * @param bass Bass control
- * @param mid Mid control
- * @param treble Treble control
- * @param presence Presence control
- * @param channelType Type of amplifier channel
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_preamp_simulation(float gain, float bass, float mid, float treble, float presence, AmpChannelType channelType, float* buffer, int bufferSize);
+typedef struct {
+  Biquad lowShelf;
+  Biquad midPeak;
+  Biquad highShelf;
+  bool enabled;
+} ThreeBandEQ;
 
-/**
- * Apply power amp simulation effect to audio buffer
- * @param masterVolume Master volume level
- * @param sag Sag amount
- * @param presence Presence control
- * @param depth Depth control
- * @param tubeType Type of tubes used
- * @param bias Bias level
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_power_amp_simulation(float masterVolume, float sag, float presence, float depth, TubeType tubeType, float bias, float* buffer, int bufferSize);
+void threebande_init(ThreeBandEQ* eq, float sampleRate);
+void threebande_process(ThreeBandEQ* eq, const float* in, float* out, size_t numSamples);
+void threebande_set_params(ThreeBandEQ* eq, float lowGainDb, float midGainDb, float highGainDb, float midFreq, float midQ);
+void threebande_set_enabled(ThreeBandEQ* eq, bool enabled);
 
-/**
- * Apply cabinet simulation effect to audio buffer
- * @param micType Type of microphone used
- * @param micPosition Position of the microphone
- * @param distance Distance from the speaker
- * @param roomAmount Amount of room ambience
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_cabinet_simulation(MicType micType, MicPosition micPosition, float distance, float roomAmount, float* buffer, int bufferSize);
 
-/**
- * Apply chorus effect to audio buffer
- * @param rate Rate of modulation in Hz
- * @param depth Depth of modulation
- * @param mix Wet/Dry mix percentage, represented as 0.0 to 1.0 with 1.0 being fully wet
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_chorus(float rate, float depth, float mix, float* buffer, int bufferSize);
+typedef struct {
+  OnePole highpass;
+  float sampleRate;
+  bool enabled;
+} HighPassFilter;
 
-/**
- * Apply flanger effect to audio buffer
- * @param rate Rate of modulation in Hz
- * @param depth Depth of modulation
- * @param mix Wet/Dry mix percentage, represented as 0.0 to 1.0 with 1.0 being fully wet
- * @param feedback Feedback amount percentage, represented as 0.0 to 1.0
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_flanger(float rate, float depth, float mix, float feedback, float* buffer, int bufferSize);
+void highpass_init(HighPassFilter* hpf, float cutoffHz, float sampleRate);
+void highpass_process(HighPassFilter* hpf, const float* in, float* out, size_t numSamples);
+void highpass_set_cutoff(HighPassFilter* hpf, float cutoffHz);
+void highpass_set_enabled(HighPassFilter* hpf, bool enabled);
 
-/**
- * Apply phaser effect to audio buffer
- * @param rate Rate of modulation in Hz
- * @param depth Depth of modulation
- * @param mix Wet/Dry mix percentage, represented as 0.0 to 1.0 with 1.0 being fully wet
- * @param stages Number of all-pass filter stages
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_phaser(float rate, float depth, float mix, int stages, float* buffer, int bufferSize);
 
-/**
- * Apply tremolo effect to audio buffer
- * @param rate Rate of modulation in Hz
- * @param depth Depth of modulation
- * @param mix Wet/Dry mix percentage, represented as 0.0 to 1.0 with 1.0 being fully wet
- * @param waveform Waveform type
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_tremolo(float rate, float depth, float mix, WaveformType waveform, float* buffer, int bufferSize);
+typedef struct {
+  OnePole lowpass;
+  bool enabled;
+} LowPassFilter;
 
-/**
- * Apply pitch shifter
- * @param interval Pitch shift interval in semitones
- * @param mix Wet/Dry mix percentage, represented as 0.0 to 1.0 with 1.0 being fully wet
- * @param formant Formant preservation amount ranging from 0.0 (none) to 1.0 (full)
- * @param quality Quality setting (0 = low, 1 = high)
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_pitch_shifter(float interval, float mix, float formant, int quality, float* buffer, int bufferSize);
+void lowpass_init(LowPassFilter* lpf, float cutoffHz, float sampleRate);
+void lowpass_process(LowPassFilter* lpf, const float* in, float* out, size_t numSamples);
+void lowpass_set_cutoff(LowPassFilter* lpf, float cutoffHz);
+void lowpass_set_enabled(LowPassFilter* lpf, bool enabled);
 
-/**
- * Apply looper effect to audio buffer
- * @param loopLength Length of the loop in milliseconds
- * @param feedback Feedback amount percentage, represented as 0.0 to 1.0
- * @param overdubLevel Overdub level percentage, represented as 0.0 to 1.0
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_looper(float loopLength, float feedback, float overdubLevel, float* buffer, int bufferSize);
 
-/**
- * Apply clipper effect to audio buffer
- * @param threshold Clipping threshold level in dB
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_clipper(float threshold, float* buffer, int bufferSize);
+typedef struct {
+  CompressorState state;
+  float threshold;
+  float ratio;
+  float makeup;
+  float kneeDb;
+  bool enabled;
+} Compressor;
 
-/**
- * Apply limiter effect to audio buffer
- * @param threshold Limiting threshold level in dB
- * @param ratio Ratio of compression, typically very high (e.g., 10:1 or greater), input as a float (e.g., 10.0 for 10:1)
- * @param releaseTime Release time in milliseconds
- * @param attackTime Attack time in milliseconds
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_limiter(float threshold, float ratio, float attackTime, float releaseTime, float* buffer, int bufferSize);
+void compressor_init_interface(Compressor* comp, float attackMs, float releaseMs, float sampleRate);
+void compressor_process_interface(Compressor* comp, const float* in, float* out, size_t numSamples);
+void compressor_set_params_interface(Compressor* comp, float thresholdDb, float ratio, float makeupDb, float kneeDb);
+void compressor_set_enabled(Compressor* comp, bool enabled);
 
-/**
- * Apply spectral enhancer effect to audio buffer using FFT
- * @param amount Amount of enhancement
- * @param harmonics Harmonics control
- * @param tilt Tilt control
- * @param mix Wet/Dry mix percentage, represented as 0.0 to 1.0 with 1.0 being fully wet
- * @param buffer Audio buffer to process
- * @param bufferSize Size of the audio buffer
- */
-void apply_spectral_enhancer(float amount, float harmonics, float tilt, float mix, float* buffer, int bufferSize);
 
-#endif
+typedef struct {
+  CompressorState state;
+  float threshold;
+  bool enabled;
+} Limiter;
+
+void limiter_init(Limiter* lim, float thresholdDb, float attackMs, float releaseMs, float sampleRate);
+void limiter_process(Limiter* lim, const float* in, float* out, size_t numSamples);
+void limiter_set_threshold(Limiter* lim, float thresholdDb);
+void limiter_set_enabled(Limiter* lim, bool enabled);
+
+
+typedef struct {
+  DelayLine delayLine;
+  float delaySamples;
+  float feedback;
+  float dryWet;
+  bool enabled;
+} Delay;
+
+void delay_init(Delay* dly, float* bufferMemory, size_t bufferSize, float maxDelayMs, float sampleRate);
+void delay_process(Delay* dly, const float* in, float* out, size_t numSamples);
+void delay_set_params(Delay* dly, float delayMs, float feedback, float dryWetMix);
+void delay_set_enabled(Delay* dly, bool enabled);
+
+
+typedef struct {
+  SimpleReverb reverb;
+  float roomSize;
+  float damping;
+  float width;
+  float dryWet;
+  bool enabled;
+} Reverb;
+
+void reverb_init_interface(Reverb* rev, float* bufferMemory, size_t bufferSize, float sampleRate);
+void reverb_process_interface(Reverb* rev, const float* in, float* out, size_t numSamples);
+void reverb_set_params_interface(Reverb* rev, float roomSize, float damping, float width, float dryWetMix);
+void reverb_set_enabled(Reverb* rev, bool enabled);
+
+
+typedef struct {
+  DelayLine delayLine;
+  LFO lfo;
+  float baseDelaySamples;
+  float depthSamples;
+  float dryWet;
+  float feedback;
+  bool enabled;
+} Chorus;
+
+void chorus_init(Chorus* ch, float* bufferMemory, size_t bufferSize, 
+                 float maxDelayMs, float sampleRate);
+void chorus_process(Chorus* ch, const float* in, float* out, size_t numSamples);
+void chorus_set_params(Chorus* ch, float rateHz, float depthMs, float dryWetMix);
+void chorus_set_enabled(Chorus* ch, bool enabled);
+
+
+typedef struct {
+  DelayLine delayLine;
+  LFO lfo;
+  float baseDelaySamples;
+  float depthSamples;
+  float feedback;
+  float dryWet;
+  bool enabled;
+} Flanger;
+
+void flanger_init(Flanger* fl, float* bufferMemory, size_t bufferSize, float sampleRate);
+void flanger_process(Flanger* fl, const float* in, float* out, size_t numSamples);
+void flanger_set_params(Flanger* fl, float rateHz, float depthMs, float feedback, 
+                        float dryWetMix);
+void flanger_set_enabled(Flanger* fl, bool enabled);
+
+
+typedef struct {
+  AllPass1 allpassStages[4];
+  LFO lfo;
+  float feedback;
+  float dryWet;
+  bool enabled;
+} Phaser;
+
+void phaser_init(Phaser* ph, float sampleRate);
+void phaser_process(Phaser* ph, const float* in, float* out, size_t numSamples);
+void phaser_set_params(Phaser* ph, float rateHz, float feedback, float dryWetMix);
+void phaser_set_enabled(Phaser* ph, bool enabled);
+
+
+typedef struct {
+  LFO lfo;
+  float depth;
+  bool enabled;
+} Tremolo;
+
+void tremolo_init(Tremolo* tr, float sampleRate);
+void tremolo_process(Tremolo* tr, const float* in, float* out, size_t numSamples);
+void tremolo_set_params(Tremolo* tr, float rateHz, float depth);
+void tremolo_set_enabled(Tremolo* tr, bool enabled);
+
+
+typedef struct {
+  TubePreamp preamp;
+  float gain;
+  float lowGain;
+  float midGain;
+  float highGain;
+  float sagAmount;
+  bool enabled;
+} PreampSimulator;
+
+void preamp_init(PreampSimulator* preamp, float* wsTable, size_t wsTableSize, float sampleRate);
+void preamp_process(PreampSimulator* preamp, const float* in, float* out, size_t numSamples);
+void preamp_set_gain(PreampSimulator* preamp, float gainDb);
+void preamp_set_tone_stack(PreampSimulator* preamp, float lowDb, float midDb, float highDb);
+void preamp_set_sag(PreampSimulator* preamp, float sagAmount);
+void preamp_set_enabled(PreampSimulator* preamp, bool enabled);
+
+
+typedef struct {
+  float* waveshapeTable;
+  size_t waveshapeTableSize;
+  float sagAmount;
+  float sagTimeConstant;
+  float supplyVoltage;
+  float supplyFilter;
+  float outputGain;
+  bool enabled;
+} PowerAmpSimulator;
+
+void poweramp_init(PowerAmpSimulator* poweramp, float* wsTable, size_t wsTableSize, float sampleRate);
+void poweramp_process(PowerAmpSimulator* poweramp, const float* in, float* out, size_t numSamples);
+void poweramp_set_params(PowerAmpSimulator* poweramp, float sagAmount, float outputDb);
+void poweramp_set_enabled(PowerAmpSimulator* poweramp, bool enabled);
+
+
+typedef struct {
+  Biquad resonance;
+  Biquad presence;
+  Biquad damping;
+  bool enabled;
+} CabinetSimulator;
+
+void cabinet_init(CabinetSimulator* cab, float sampleRate);
+void cabinet_process(CabinetSimulator* cab, const float* in, float* out, size_t numSamples);
+void cabinet_set_type(CabinetSimulator* cab, int cabinetType);
+void cabinet_set_enabled(CabinetSimulator* cab, bool enabled);
+
+
+typedef struct {
+  // Input stage
+  NoiseGate noisegate;
+  HighPassFilter inputHighpass;
+  
+  // Preamp effects
+  Overdrive overdrive;
+  Distortion distortion;
+  Fuzz fuzz;
+  
+  // Tone shaping
+  ThreeBandEQ eq;
+  Compressor compressor;
+  
+  // Modulation effects
+  Chorus chorus;
+  Flanger flanger;
+  Phaser phaser;
+  Tremolo tremolo;
+  
+  // Time-based effects
+  Delay delay;
+  Reverb reverb;
+  
+  // Amp simulation
+  PreampSimulator preamp;
+  PowerAmpSimulator poweramp;
+  CabinetSimulator cabinet;
+  
+  // Output protection
+  Limiter limiter;
+  
+  // Configuration
+  float sampleRate;
+  bool bypass;
+} AmpChain;
+
+void ampchain_init(AmpChain* chain, float* memoryPool, size_t memorySize, float sampleRate);
+void ampchain_process(AmpChain* chain, const float* in, float* out, size_t numSamples);
+void ampchain_set_bypass(AmpChain* chain, bool bypass);
+void ampchain_reset_all(AmpChain* chain);
+
+#endif /* EFFECTS_INTERFACE_H */

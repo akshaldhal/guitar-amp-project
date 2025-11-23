@@ -180,9 +180,10 @@ float ms_to_coeff(float ms, float sampleRate) {
 
 // States ahead, beaware:
 
-void onepole_init(OnePole* f, float cutoffHz, float sampleRate, int isHighPass) {
+void onepole_init(OnePole* f, DSPState* state, float cutoffHz, int isHighPass) {
+  f->state = state;
   f->isHighPass = isHighPass;
-  float x = expf(-2.0f * M_PI * cutoffHz / sampleRate);
+  float x = expf(-2.0f * M_PI * cutoffHz / state->sampleRate);
   if (isHighPass) {
     float scale = (1.0f + x) / 2.0f;
     f->b0 = scale;
@@ -213,8 +214,8 @@ void onepole_process(OnePole* f, const float* in, float* out, size_t numSamples)
   }
 }
 
-void onepole_set_cutoff(OnePole* f, float cutoffHz, float sampleRate) {
-  float x = expf(-2.0f * M_PI * cutoffHz / sampleRate);
+void onepole_set_cutoff(OnePole* f, float cutoffHz) {
+  float x = expf(-2.0f * M_PI * cutoffHz / f->state->sampleRate);
   int isHighPass = f->isHighPass;
   if (isHighPass) {
     float scale = (1.0f + x) / 2.0f;
@@ -228,8 +229,9 @@ void onepole_set_cutoff(OnePole* f, float cutoffHz, float sampleRate) {
   }
 }
 
-void biquad_init(Biquad* bq, BiquadType type, float freqHz, float Q, float gainDb, float sampleRate) {
-  biquad_set_params(bq, type, freqHz, Q, gainDb, sampleRate);
+void biquad_init(Biquad* bq, DSPState* state, BiquadType type, float freqHz, float Q, float gainDb) {
+  bq->state = state;
+  biquad_set_params(bq, type, freqHz, Q, gainDb);
   bq->z1 = 0.0f;
   bq->z2 = 0.0f;
 }
@@ -263,9 +265,9 @@ void biquad_process_inplace(Biquad* bq, float* buffer, size_t numSamples) {
   biquad_process(bq, buffer, buffer, numSamples);
 }
 
-void biquad_set_params(Biquad* bq, BiquadType type, float freqHz, float Q, float gainDb, float sampleRate){
+void biquad_set_params(Biquad* bq, BiquadType type, float freqHz, float Q, float gainDb) {
   float A = powf(10.0f, gainDb / 40.0f);
-  float omega = hz_to_omega(freqHz, sampleRate);
+  float omega = hz_to_omega(freqHz, bq->state->sampleRate);
   float sinOmega = sinf(omega);
   float cosOmega = cosf(omega);
   float alpha = sinOmega / (2.0f * Q);
@@ -366,13 +368,13 @@ void apply_gain_smoothing(float* currentGain, const float* targetGain, float* st
   *state = curr;
 }
 
-void lfo_init(LFO* lfo, LFOType type, float freqHz, float amp, float dc, float sampleRate) {
+void lfo_init(LFO* lfo, DSPState* state, LFOType type, float freqHz, float amp, float dc) {
+  lfo->state = state;
   lfo->amp = amp;
   lfo->dc = dc;
   lfo->freq = freqHz;
   lfo->phase = 0.0f;
-  lfo->phase_inc = freqHz/sampleRate;
-  lfo->sampleRate = sampleRate;
+  lfo->phase_inc = freqHz/state->sampleRate;
   lfo->type = type;
 }
 
@@ -422,15 +424,15 @@ void lfo_process(LFO* lfo, float* out, size_t numSamples) {
 
 void lfo_set_freq(LFO* lfo, float freqHz) {
   lfo->freq = freqHz;
-  float sampleRate = lfo->sampleRate;
+  float sampleRate = lfo->state->sampleRate;
   lfo->phase_inc = freqHz / sampleRate;
 }
 
-void env_init(EnvelopeDetector* ed, float attackMs, float releaseMs, float sampleRate, int isRMS) {
-  ed->attackCoeff = ms_to_coeff(attackMs, sampleRate);
-  ed->releaseCoeff = ms_to_coeff(releaseMs, sampleRate);
+void env_init(EnvelopeDetector* ed, DSPState* state, float attackMs, float releaseMs, int isRMS) {
+  ed->attackCoeff = ms_to_coeff(attackMs, state->sampleRate);
+  ed->releaseCoeff = ms_to_coeff(releaseMs, state->sampleRate);
   ed->isRMS = isRMS;
-  ed->sampleRate = sampleRate;
+  ed->state = state;
   ed->env = 0.0f;
 }
 
@@ -464,37 +466,36 @@ void env_process(EnvelopeDetector* ed, const float* in, float* out, size_t numSa
   ed->env = env;
 }
 
-void allpass1_init(AllPass1* ap, float feedback) {
-  ap->g = clampf(feedback, -0.9999f, 0.9999f); 
-  ap->x_prev = 0.0f;
-  ap->y_prev = 0.0f;
+void allpass_delay_init(AllPassDelay* ap, float* bufferMemory, size_t bufferLength,float feedback) {
+  ap->buffer = bufferMemory;
+  ap->bufferLength = bufferLength;
+  ap->index = 0;
+  ap->g = clampf(feedback, -0.9999f, 0.9999f);
 }
 
-void allpass1_process(AllPass1* ap, const float* in, float* out, size_t numSamples) {
-  const float g = ap->g; 
-  float x_prev = ap->x_prev;
-  float y_prev = ap->y_prev;
-
+void allpass_delay_process(AllPassDelay* ap, const float* in, float* out, size_t numSamples) {
+  float* buffer = ap->buffer;
+  size_t D      = ap->bufferLength;
+  size_t idx    = ap->index;
+  float g       = ap->g;
   for (size_t n = 0; n < numSamples; n++) {
-    float input = in[n];
-    float output = (-g * input) + x_prev + (g * y_prev);
-    x_prev = input;
-    y_prev = output;
-    
-    out[n] = output;
+
+    float x = in[n];
+    float buf = buffer[idx];
+    float y = -g * x + buf;
+    buffer[idx] = x + g * y;
+    out[n] = y;
+    idx++;
+    if (idx >= D) idx = 0;
   }
-  ap->x_prev = x_prev;
-  ap->y_prev = y_prev;
+  ap->index = idx;
 }
 
-void delayline_init(DelayLine* dl, float* bufferMemory, size_t size, float sampleRate) {
+void delayline_init(DelayLine* dl, DSPState* state, float* bufferMemory, size_t size) {
+  dl->state = state;
   dl->buffer = bufferMemory;
   dl->size = size;
-
   dl->writeIndex = 0;
-
-  dl->sampleRate = sampleRate;
-
   if (dl->buffer != NULL && dl->size > 0) {
     memset(dl->buffer, 0, dl->size * sizeof(float));
   }
@@ -574,150 +575,21 @@ void delayline_read_cubic(DelayLine* dl, float* out, size_t numSamples, float de
 }
 
 
-// Idk if these are SIMD friendly, I didn't pay attention too much, check again, they're probably not:
-
-void resampler_init(ResamplerState* rs, float* historyBuffer, size_t firLen) {
-  if (firLen < 2) {
-    log_message(LOG_LEVEL_ERROR, "firLen cannot be less than 2, not initializing ResamplerState");
-  }
-  rs->history = historyBuffer;
-  rs->historySize = firLen;
-  if (rs->history != NULL && rs->historySize > 0) {
-    memset(rs->history, 0, rs->historySize * sizeof(float));
-  }
-}
-
-void design_resampler_fir(float* fir, size_t numTaps, float gain) {
-  if (fir == NULL || numTaps == 0) return;
-  const float cutoffNorm = 0.24f; 
-  const float center = (float)(numTaps - 1) * 0.5f;
-  const float two_pi_cutoff = 2.0f * M_PI * cutoffNorm;
-  float sum = 0.0f;
-  for (size_t i = 0; i < numTaps; i++) {
-    float n = (float)i - center;
-    float sinc;
-    if (fabsf(n) < 1e-5f) {
-      sinc = 1.0f; 
-    } else {
-      float arg = two_pi_cutoff * n; 
-      sinc = sinf(arg) / (M_PI * n);
-    }
-    float window = blackman_window_scalar((float)i, numTaps);
-    fir[i] = sinc * window;
-    sum += fir[i];
-  }
-  if (fabsf(sum) > 1e-9f) {
-    float scale = gain / sum;
-    for (size_t i = 0; i < numTaps; i++) {
-      fir[i] *= scale;
-    }
-  }
-}
-
-void oversample2x_linear(const float* in, float* out, size_t n, float* state) {
-  size_t j = 0;
-  for (size_t i = 0; i < n - 1; i++) {
-    float x0 = in[i];
-    float x1 = in[i + 1];
-    out[j++] = x0;
-    out[j++] = 0.5f * (x0 + x1);
-  }
-  float last = in[n - 1];
-  out[j++] = last;
-  out[j++] = last; 
-  *state = last;
-}
-
-void oversample2x_fir(const float* in, float* out, size_t n, const float* fir, ResamplerState* state) {
-  size_t firLen = state->historySize;
-  size_t halfLen = firLen / 2;
-  float* history = state->history;
-  for (size_t i = 0; i < n; i++) {
-    float input = in[i];
-    memmove(&history[0], &history[1], (halfLen - 1) * sizeof(float));
-    history[halfLen - 1] = input;
-    float accEven = 0.0f;
-    float accOdd  = 0.0f;
-    for (size_t k = 0; k < halfLen; k++) {
-      float histVal = history[halfLen - 1 - k];
-      accEven += histVal * fir[2 * k];
-      accOdd  += histVal * fir[2 * k + 1];
-    }
-    out[2 * i] = accEven;
-    out[2 * i + 1] = accOdd;
-  }
-}
-
-void downsample2x(const float* in, float* out, size_t n) {
-  size_t outLen = n / 2;
-  for (size_t i = 0; i < outLen; i++) {
-    out[i] = in[2 * i];
-  }
-}
-
-void downsample2x_fir(const float* in, float* out, size_t n, const float* fir, ResamplerState* state) {
-  if (n < 2) return;
-  float* history = state->history;
-  size_t firLen = state->historySize;
-  size_t outLen = n / 2;
-  for (size_t i = 0; i < outLen; i++) {
-    memmove(&history[0], &history[2], (firLen - 2) * sizeof(float));
-    history[firLen - 2] = in[2 * i];
-    history[firLen - 1] = in[2 * i + 1];
-    float acc = 0.0f;
-    for (size_t k = 0; k < firLen; k++) {
-      acc += history[firLen - 1 - k] * fir[k];
-    }
-    out[i] = acc;
-  }
-}
-
-void denormal_fix_inplace(float* buffer, size_t n) {
-  const float DENORMAL_THRESHOLD = 1.0e-24f;
-  for (size_t i = 0; i < n; i++) {
-    buffer[i] *= (fabsf(buffer[i]) >= DENORMAL_THRESHOLD);
-  }
-}
-
-float blackman_window_scalar(float w, size_t n) {
-  float N = (float)n;
-  const float alpha = 0.16f;
-  const float a0 = (1.0f - alpha) / 2.0f;
-  const float a1 = 0.5f;
-  const float a2 = alpha / 2.0f;
-  return a0 - a1 * cosf((2.0f * M_PI * w) / (N - 1)) + a2 * cosf((4.0f * M_PI * w) / (N - 1));
-}
-
-void build_blackman_window(float* w, size_t n) {
-  for (size_t i = 0; i < n; i++)
-  {
-    w[i] = blackman_window_scalar((float)i, n);
-  }
-}
-
-void normalize_ir(float* ir, size_t n, float targetRMS) {
-  if (ir == NULL || n == 0 || targetRMS < 1e-9f) return;
-  float sum_sq = 0.0f;
-  for (size_t i = 0; i < n; i++) {
-    sum_sq += ir[i] * ir[i];
-  }
-  float currentRMS = sqrtf(sum_sq / (float)n);
-  if (currentRMS > 1e-9f) {
-    float scale = targetRMS / currentRMS;
-    for (size_t i = 0; i < n; i++) {
-      ir[i] *= scale;
-    }
-  }
-}
-
-
-
-
-
-
 
 // These compute stuff right now, use pre comuted tables later (IF YOU WANT):
 // Also these are kinda AI generated formulas/comments, need a deeper review
+
+
+dsp_state_init(DSPState* state, float sampleRate, uint32_t numChannels, uint32_t blockSize) {
+  if (numChannels > 1) {
+    log_message(LOG_LEVEL_ERROR, "Only one channel supported at the moment");
+    return;
+  }
+  state->sampleRate = sampleRate;
+  state->blockSize = blockSize;
+  state->sampleRate = sampleRate;
+}
+
 void build_triode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax) {
   if (table == NULL || tableSize == 0 || params == NULL) return;
   for (size_t i = 0; i < tableSize; i++) {
@@ -765,99 +637,22 @@ void build_tube_table_from_koren(float* table, size_t tableSize, TubeType type, 
   }
 }
 
-// More stuff ofc, not thoroughly checked:
+// Move to effects rather than dsp core
 
-void reverb_init(SimpleReverb* rev, float* bufferMemory, size_t bufferSize, float sampleRate) {
-  const size_t comb_sizes[4] = {1116, 1188, 1277, 1356};
-  size_t offset = 0;
-  for (int i = 0; i < 4; i++) {
-    size_t delayBytes = comb_sizes[i] * sizeof(float);
-    if (offset + delayBytes > bufferSize) {
-      log_message(LOG_LEVEL_ERROR, "Reverb buffer overflow at comb filter %d", i);
-      return;
-    }
-    delayline_init(&rev->combLines[i], bufferMemory + offset, comb_sizes[i], sampleRate);
-    offset += comb_sizes[i];
-  }
-  for (int i = 0; i < 2; i++) {
-    allpass1_init(&rev->allpassLines[i], 0.5f);
-  }
-  for (int i = 0; i < 4; i++) {
-    rev->combDamp[i] = 0.0f;
-  }
-  
-  rev->wetGain = 0.3f;
-  rev->dryGain = 0.4f;
-  rev->width = 1.0f;
-}
+//REMOVE MALLOCS THEY ARE SLOWWWWWWWW
 
-void reverb_process(SimpleReverb* rev, const float* in, float* out, size_t numSamples) {
-  float* temp_comb = (float*)malloc(numSamples * sizeof(float));
-  float* temp_wet = (float*)malloc(numSamples * sizeof(float));
-  
-  memset(temp_wet, 0, numSamples * sizeof(float));
-  for (int i = 0; i < 4; i++) {
-    memset(temp_comb, 0, numSamples * sizeof(float));
-    for (size_t j = 0; j < numSamples; j++) {
-      float delayed = 0.0f;
-      delayline_read_linear(&rev->combLines[i], &delayed, 1, (float)rev->combLines[i].size - 1.0f);
-      float damp_coeff = 0.5f;
-      rev->combDamp[i] = delayed * damp_coeff + rev->combDamp[i] * (1.0f - damp_coeff);
-      float feedback = rev->combDamp[i] * 0.84f;
-      temp_comb[j] = in[j] + feedback;
-      
-      delayline_write(&rev->combLines[i], &temp_comb[j], 1);
-    }
-    for (size_t j = 0; j < numSamples; j++) {
-      temp_wet[j] += temp_comb[j];
-    }
-  }
-
-  float* temp_ap = temp_wet;
-  for (int i = 0; i < 2; i++) {
-    float* temp_ap_out = (float*)malloc(numSamples * sizeof(float));
-    allpass1_process(&rev->allpassLines[i], temp_ap, temp_ap_out, numSamples);
-    if (i > 0) free(temp_ap);
-    temp_ap = temp_ap_out;
-  }
-  
-  for (size_t i = 0; i < numSamples; i++) {
-    float wet_sig = temp_ap[i] * rev->wetGain;
-    float dry_sig = in[i] * rev->dryGain;
-    float width_mix = wet_sig * rev->width + wet_sig * (1.0f - rev->width) * 0.5f;
-    out[i] = clampf(dry_sig + width_mix, -1.0f, 1.0f);
-  }
-  
-  free(temp_comb);
-  free(temp_wet);
-  free(temp_ap);
-}
-
-void reverb_set_params(SimpleReverb* rev, float room, float damp, float width) {
-  
-  room = clampf(room, 0.0f, 1.0f);
-  damp = clampf(damp, 0.0f, 1.0f);
-  width = clampf(width, 0.0f, 1.0f);
-  
-  rev->wetGain = room * 0.6f + 0.2f;
-  rev->width = width;
-  for (int i = 0; i < 4; i++) {
-    rev->combDamp[i] = damp * 0.4f + 0.1f;
-  }
-}
-
-
-void tubepreamp_init(TubePreamp* preamp, float* wsTable, size_t wsTableSize, float sampleRate) {
-  biquad_init(&preamp->inputHighpass, BQ_HPF, 20.0f, 0.707f, 0.0f, sampleRate);
+void tubepreamp_init(TubePreamp* preamp, DSPState* state, float* wsTable, size_t wsTableSize) {
+  preamp->state = state;
+  biquad_init(&preamp->inputHighpass, state, BQ_HPF, 20.0f, 0.707f, 0.0f);
   
   preamp->waveshapeTable = wsTable;
   preamp->waveshapeTableSize = wsTableSize;
   preamp->tubeGain = 1.0f;
   
   // Tone stack: 3-band EQ (Low, Mid, High)
-  biquad_init(&preamp->toneStack[0], BQ_LOWSHELF, 80.0f, 0.707f, 0.0f, sampleRate);
-  biquad_init(&preamp->toneStack[1], BQ_PEAK, 500.0f, 1.0f, 0.0f, sampleRate);
-  biquad_init(&preamp->toneStack[2], BQ_HIGHSHELF, 8000.0f, 0.707f, 0.0f, sampleRate);
+  biquad_init(&preamp->toneStack[0], state, BQ_LOWSHELF, 80.0f, 0.707f, 0.0f);
+  biquad_init(&preamp->toneStack[1], state, BQ_PEAK, 500.0f, 1.0f, 0.0f);
+  biquad_init(&preamp->toneStack[2], state, BQ_HIGHSHELF, 8000.0f, 0.707f, 0.0f);
   
   preamp->sagAmount = 0.1f;
   preamp->sagTimeConstant = 0.05f;
@@ -866,7 +661,7 @@ void tubepreamp_init(TubePreamp* preamp, float* wsTable, size_t wsTableSize, flo
 }
 
 void tubepreamp_process(TubePreamp* preamp, const float* in, float* out, size_t numSamples) {
-  float* temp = (float*)malloc(numSamples * sizeof(float));
+  float* temp = (float*)usescratch_instead(numSamples * sizeof(float));
   
   biquad_process(&preamp->inputHighpass, in, temp, numSamples);
 
@@ -904,9 +699,9 @@ void tubepreamp_set_gain(TubePreamp* preamp, float gainDb) {
 }
 
 
-
-void compressor_init(CompressorState* comp, float attackMs, float releaseMs, float sampleRate) {
-  env_init(&comp->detector, attackMs, releaseMs, sampleRate, 1);  // RMS detection
+void compressor_init(CompressorState* comp, DSPState* state, float attackMs, float releaseMs) {
+  comp->state = state;
+  env_init(&comp->detector, state, attackMs, releaseMs, 1);
   comp->ratio = 4.0f;
   comp->threshold = -20.0f;
   comp->makeup = 0.0f;
@@ -915,10 +710,10 @@ void compressor_init(CompressorState* comp, float attackMs, float releaseMs, flo
 }
 
 void compressor_process(CompressorState* comp, const float* in, float* out, size_t numSamples) {
-  float* inputDb = (float*)malloc(numSamples * sizeof(float));
-  float* gainReduction = (float*)malloc(numSamples * sizeof(float));
-  float* smoothedGain = (float*)malloc(numSamples * sizeof(float));
-  float* thresholdDb = (float*)malloc(numSamples * sizeof(float));
+  float* inputDb = (float*)usescratch_instead(numSamples * sizeof(float));
+  float* gainReduction = (float*)usescratch_instead(numSamples * sizeof(float));
+  float* smoothedGain = (float*)usescratch_instead(numSamples * sizeof(float));
+  float* thresholdDb = (float*)usescratch_instead(numSamples * sizeof(float));
   
   // Convert input to dB
   for (size_t i = 0; i < numSamples; i++) {
@@ -982,3 +777,4 @@ void compressor_set_params(CompressorState* comp, float threshold, float ratio, 
   comp->ratio = clampf(ratio, 1.0f, 20.0f);
   comp->makeup = clampf(makeup, -24.0f, 24.0f);
 }
+
