@@ -578,17 +578,51 @@ void delayline_read_cubic(DelayLine* dl, float* out, size_t numSamples, float de
 
 // These compute stuff right now, use pre comuted tables later (IF YOU WANT):
 // Also these are kinda AI generated formulas/comments, need a deeper review
+// Move to effects rather than dsp core
 
-
-dsp_state_init(DSPState* state, float sampleRate, uint32_t numChannels, uint32_t blockSize) {
+void dsp_state_init(DSPState* state, float sampleRate, uint32_t numChannels, uint32_t blockSize) {
   if (numChannels > 1) {
     log_message(LOG_LEVEL_ERROR, "Only one channel supported at the moment");
     return;
   }
   state->sampleRate = sampleRate;
   state->blockSize = blockSize;
-  state->sampleRate = sampleRate;
+  state->numChannels = numChannels;
+  state->scratchSize = blockSize * sampleRate * 4;
+  for (int i = 0; i < NUM_SCRATCH_BUFFERS; i++) {
+    state->scratch[i] = (float*)malloc(state->scratchSize * sizeof(float));
+    if (!state->scratch[i]) {
+      log_message(LOG_LEVEL_ERROR, "Failed to allocate DSP scratch buffer %d", i);
+    }
+  }
 }
+
+void dsp_state_cleanup(DSPState* state) {
+  for (int i = 0; i < NUM_SCRATCH_BUFFERS; i++) {
+    if (state->scratch[i]) {
+      free(state->scratch[i]);
+      state->scratch[i] = NULL;
+    }
+  }
+  state->scratchSize = 0;
+}
+
+void dsp_state_grow_scratches(DSPState* state, size_t newSize) {
+  log_message(LOG_LEVEL_DEBUG, "Buffer regrow called");
+  if (newSize > state->scratchSize) {
+    state->scratchSize = newSize;
+    for (int i = 0; i < NUM_SCRATCH_BUFFERS; i++) {
+      state->scratch[i] = (float*)realloc(state->scratch[i], state->scratchSize * sizeof(float));
+      if (!state->scratch[i]) {
+        log_message(LOG_LEVEL_ERROR, "Failed to reallocate DSP scratch buffer %d", i);
+      }
+    }
+  }
+}
+
+/*============================================================================
+  TUBE TABLE BUILDERS
+============================================================================*/
 
 void build_triode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax) {
   if (table == NULL || tableSize == 0 || params == NULL) return;
@@ -637,9 +671,9 @@ void build_tube_table_from_koren(float* table, size_t tableSize, TubeType type, 
   }
 }
 
-// Move to effects rather than dsp core
-
-//REMOVE MALLOCS THEY ARE SLOWWWWWWWW
+/*============================================================================
+  TUBE PREAMP - Uses dedicated scratch buffers
+============================================================================*/
 
 void tubepreamp_init(TubePreamp* preamp, DSPState* state, float* wsTable, size_t wsTableSize) {
   preamp->state = state;
@@ -649,7 +683,6 @@ void tubepreamp_init(TubePreamp* preamp, DSPState* state, float* wsTable, size_t
   preamp->waveshapeTableSize = wsTableSize;
   preamp->tubeGain = 1.0f;
   
-  // Tone stack: 3-band EQ (Low, Mid, High)
   biquad_init(&preamp->toneStack[0], state, BQ_LOWSHELF, 80.0f, 0.707f, 0.0f);
   biquad_init(&preamp->toneStack[1], state, BQ_PEAK, 500.0f, 1.0f, 0.0f);
   biquad_init(&preamp->toneStack[2], state, BQ_HIGHSHELF, 8000.0f, 0.707f, 0.0f);
@@ -661,7 +694,11 @@ void tubepreamp_init(TubePreamp* preamp, DSPState* state, float* wsTable, size_t
 }
 
 void tubepreamp_process(TubePreamp* preamp, const float* in, float* out, size_t numSamples) {
-  float* temp = (float*)usescratch_instead(numSamples * sizeof(float));
+  if (numSamples > preamp->state->scratchSize) {
+    dsp_state_grow_scratches(preamp->state, numSamples * 2);
+  }
+  
+  float* temp = preamp->state->scratch[0];
   
   biquad_process(&preamp->inputHighpass, in, temp, numSamples);
 
@@ -669,7 +706,7 @@ void tubepreamp_process(TubePreamp* preamp, const float* in, float* out, size_t 
     temp[i] *= preamp->tubeGain;
   }
   
-  float sag_coeff = ms_to_coeff(preamp->sagTimeConstant * 1000.0f, 44100.0f);
+  float sag_coeff = ms_to_coeff(preamp->sagTimeConstant * 1000.0f, preamp->state->sampleRate);
   for (size_t i = 0; i < numSamples; i++) {
     float input_level = fabsf(temp[i]);
     float sag_amount = input_level * preamp->sagAmount;
@@ -690,14 +727,15 @@ void tubepreamp_process(TubePreamp* preamp, const float* in, float* out, size_t 
   for (size_t i = 0; i < numSamples; i++) {
     out[i] = clampf(temp[i], -1.0f, 1.0f);
   }
-  
-  free(temp);
 }
 
 void tubepreamp_set_gain(TubePreamp* preamp, float gainDb) {
   preamp->tubeGain = db_to_linear(clampf(gainDb, -12.0f, 48.0f));
 }
 
+/*============================================================================
+  COMPRESSOR - Uses dedicated scratch buffers
+============================================================================*/
 
 void compressor_init(CompressorState* comp, DSPState* state, float attackMs, float releaseMs) {
   comp->state = state;
@@ -705,15 +743,19 @@ void compressor_init(CompressorState* comp, DSPState* state, float attackMs, flo
   comp->ratio = 4.0f;
   comp->threshold = -20.0f;
   comp->makeup = 0.0f;
-  comp->kneeWidth = 0.0f;  // 0 = hard knee
+  comp->kneeWidth = 0.0f;
   comp->previousGain = 1.0f;
 }
 
 void compressor_process(CompressorState* comp, const float* in, float* out, size_t numSamples) {
-  float* inputDb = (float*)usescratch_instead(numSamples * sizeof(float));
-  float* gainReduction = (float*)usescratch_instead(numSamples * sizeof(float));
-  float* smoothedGain = (float*)usescratch_instead(numSamples * sizeof(float));
-  float* thresholdDb = (float*)usescratch_instead(numSamples * sizeof(float));
+  if (numSamples > comp->state->scratchSize) {
+    dsp_state_grow_scratches(comp->state, numSamples * 2);
+  }
+  
+  float* inputDb = comp->state->scratch[0];
+  float* gainReduction = comp->state->scratch[1];
+  float* smoothedGain = comp->state->scratch[2];
+  float* thresholdDb = comp->state->scratch[3];
   
   // Convert input to dB
   for (size_t i = 0; i < numSamples; i++) {
@@ -740,7 +782,6 @@ void compressor_process(CompressorState* comp, const float* in, float* out, size
         float excess = input - comp->threshold;
         gainReduction[i] = excess * (1.0f - 1.0f / comp->ratio);
       } else {
-        // Soft knee interpolation
         float knee_t = (input - knee_low) / comp->kneeWidth;
         float knee_t_sq = knee_t * knee_t;
         float soft_ratio = 1.0f + (comp->ratio - 1.0f) * knee_t_sq;
@@ -749,13 +790,12 @@ void compressor_process(CompressorState* comp, const float* in, float* out, size
       }
     }
   } else {
-    // Hard knee
     compute_gain_reduction_db(inputDb, thresholdDb, comp->ratio, gainReduction, numSamples);
   }
   
   // Smooth gain reduction
-  float attackCoeff = ms_to_coeff(10.0f, 44100.0f);  // Fast attack for visualization
-  float releaseCoeff = ms_to_coeff(100.0f, 44100.0f);
+  float attackCoeff = ms_to_coeff(10.0f, comp->state->sampleRate);
+  float releaseCoeff = ms_to_coeff(100.0f, comp->state->sampleRate);
   apply_gain_smoothing(smoothedGain, gainReduction, &comp->previousGain, 
                        attackCoeff, releaseCoeff, numSamples);
   
@@ -765,11 +805,6 @@ void compressor_process(CompressorState* comp, const float* in, float* out, size
     float gainLin = db_to_linear(-smoothedGain[i]) * makeupLinear;
     out[i] = in[i] * gainLin;
   }
-  
-  free(inputDb);
-  free(gainReduction);
-  free(smoothedGain);
-  free(thresholdDb);
 }
 
 void compressor_set_params(CompressorState* comp, float threshold, float ratio, float makeup) {
@@ -777,4 +812,3 @@ void compressor_set_params(CompressorState* comp, float threshold, float ratio, 
   comp->ratio = clampf(ratio, 1.0f, 20.0f);
   comp->makeup = clampf(makeup, -24.0f, 24.0f);
 }
-

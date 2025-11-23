@@ -35,6 +35,8 @@
 #define M_PI 3.14159265358979323846f
 #endif
 
+#define NUM_SCRATCH_BUFFERS 8
+
 static inline float clampf(float x, float lo, float hi) {
   return (x < lo) ? lo : (x > hi) ? hi : x;
 }
@@ -53,6 +55,9 @@ typedef struct {
   float sampleRate;
   uint32_t numChannels;
   uint32_t blockSize;
+  
+  float* scratch[NUM_SCRATCH_BUFFERS];
+  size_t scratchSize;
 } DSPState;
 
 typedef struct {
@@ -146,7 +151,8 @@ typedef struct {
 
 // implement as needed
 void dsp_state_init(DSPState* state, float sampleRate, uint32_t numChannels, uint32_t blockSize);
-
+void dsp_state_cleanup(DSPState* state);
+void dsp_state_grow_scratches(DSPState* state, size_t newSize);
 
 
 void onepole_init(OnePole* f, DSPState* state, float cutoffHz, int isHighPass);
