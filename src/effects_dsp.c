@@ -608,8 +608,8 @@ void dsp_state_cleanup(DSPState* state) {
 }
 
 void dsp_state_grow_scratches(DSPState* state, size_t newSize) {
-  log_message(LOG_LEVEL_DEBUG, "Buffer regrow called");
   if (newSize > state->scratchSize) {
+    log_message(LOG_LEVEL_DEBUG, "Buffer regrow called");
     state->scratchSize = newSize;
     for (int i = 0; i < NUM_SCRATCH_BUFFERS; i++) {
       state->scratch[i] = (float*)realloc(state->scratch[i], state->scratchSize * sizeof(float));
@@ -706,7 +706,7 @@ void tubepreamp_process(TubePreamp* preamp, const float* in, float* out, size_t 
     temp[i] *= preamp->tubeGain;
   }
   
-  float sag_coeff = ms_to_coeff(preamp->sagTimeConstant * 1000.0f, preamp->state->sampleRate);
+  float sag_coeff = ms_to_coeff(preamp->sagTimeConstant, preamp->state->sampleRate);
   for (size_t i = 0; i < numSamples; i++) {
     float input_level = fabsf(temp[i]);
     float sag_amount = input_level * preamp->sagAmount;

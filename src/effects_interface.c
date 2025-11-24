@@ -459,6 +459,8 @@ void cabinet_set_enabled(CabinetSimulator* cab, bool enabled) {
 void ampchain_init(AmpChain* chain, DSPState* state, float* wsTable, size_t wsTableSize) {
   chain->state = state;
   chain->bypass = false;
+
+  build_waveshaper_table(wsTable, wsTableSize, CLIP_SOFT_TANH, 1.0f);
   
   noisegate_init(&chain->noisegate, state, -40.0f, 1.0f, 100.0f, 50.0f);
   overdrive_init(&chain->overdrive, state, wsTable, wsTableSize);
@@ -471,29 +473,33 @@ void ampchain_init(AmpChain* chain, DSPState* state, float* wsTable, size_t wsTa
 }
 
 void ampchain_process(AmpChain* chain, const float* in, float* out, size_t numSamples) {
-  if (chain->bypass) {
-    memcpy(out, in, numSamples * sizeof(float));
-    return;
-  }
-  
-  float* buf = chain->state->scratch[5];
-  if (numSamples > chain->state->scratchSize) {
-    dsp_state_grow_scratches(chain->state, numSamples * 2);
-    buf = chain->state->scratch[5];
-  }
-  
-  memcpy(buf, in, numSamples * sizeof(float));
-  
-  noisegate_process(&chain->noisegate, buf, buf, numSamples);
-  overdrive_process(&chain->overdrive, buf, buf, numSamples);
-  distortion_process(&chain->distortion, buf, buf, numSamples);
-  compressor_fx_process(&chain->compressor, buf, buf, numSamples);
-  preamp_process(&chain->preamp, buf, buf, numSamples);
-  poweramp_process(&chain->poweramp, buf, buf, numSamples);
-  cabinet_process(&chain->cabinet, buf, buf, numSamples);
-  limiter_process(&chain->limiter, buf, buf, numSamples);
-  
-  memcpy(out, buf, numSamples * sizeof(float));
+    if (chain->bypass) {
+        memcpy(out, in, numSamples * sizeof(float));
+        return;
+    }
+
+    // Use a dedicated scratch buffer for the DSP chain
+    float* buf = chain->state->scratch[2];  // scratch[2] reserved for processing
+
+    // Ensure we never overflow (callback should never grow in real-time)
+    if (numSamples > chain->state->scratchSize) {
+        // Clip instead of realloc
+        numSamples = chain->state->scratchSize;
+    }
+
+    memcpy(buf, in, numSamples * sizeof(float));
+
+    // Process DSP in-place safely
+    noisegate_process(&chain->noisegate, buf, buf, numSamples);
+    overdrive_process(&chain->overdrive, buf, buf, numSamples);
+    distortion_process(&chain->distortion, buf, buf, numSamples);
+    compressor_fx_process(&chain->compressor, buf, buf, numSamples);
+    preamp_process(&chain->preamp, buf, buf, numSamples);
+    poweramp_process(&chain->poweramp, buf, buf, numSamples);
+    cabinet_process(&chain->cabinet, buf, buf, numSamples);
+    limiter_process(&chain->limiter, buf, buf, numSamples);
+
+    memcpy(out, buf, numSamples * sizeof(float));
 }
 
 void ampchain_set_bypass(AmpChain* chain, bool bypass) {
