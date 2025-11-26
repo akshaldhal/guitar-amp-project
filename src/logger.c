@@ -1,12 +1,16 @@
 #include <logger.h>
 
+#define DEBUG_MODE 1
+
 void log_message(LogLevel level, const char *message, ...) {
   va_list args;
   va_start(args, message);
 
   switch (level) {
     case LOG_LEVEL_DEBUG:
-      printf("\033[0;36m[DEBUG] ");
+      if (DEBUG_MODE){
+        printf("\033[0;36m[DEBUG] ");
+      }
       break;
     case LOG_LEVEL_INFO:
       printf("\033[0;32m[INFO] ");

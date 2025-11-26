@@ -140,12 +140,12 @@ typedef enum {
 } TubeType;
 
 typedef struct {
-  float mu;
-  float k;
-  float a;
-  float Kg1;
-  float Rp;
-  float biasV;
+  float mu;    // Amplification factor
+  float x;     // Exponent
+  float kg1;   // Plate current fitting factor
+  float kg2;   // Screen grid current fitting factor (for screen current only)
+  float kp;    // Plate voltage parameter
+  float kvb;   // Knee voltage parameter
 } TubeParams;
 
 
@@ -196,9 +196,9 @@ void waveshaper_lookup(const float* in, float* out, const float* lookupTable, si
 void waveshaper_lookup_linear(const float* in, float* out, const float* lookupTable, size_t tableSize, size_t numSamples);
 void waveshaper_lookup_cubic(const float* in, float* out, const float* lookupTable, size_t tableSize, size_t numSamples);
 
-void build_triode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax);
-void build_pentode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax);
-void build_tube_table_from_koren(float* table, size_t tableSize, TubeType type, const TubeParams* params, float vMin, float vMax);
+void build_triode_table(float* table, size_t tableSize, const TubeParams* p, float gridMin, float gridMax, float Ep);
+void build_pentode_table(float* table, size_t tableSize, const TubeParams* p, float gridMin, float gridMax, float Eg2, float Ep);
+void build_tube_table_from_koren(float* table, size_t tableSize, TubeType type, const TubeParams* p, float vMin, float vMax, float Ep, float Eg2);
 
 void build_hann_window(float* w, size_t n);
 
@@ -209,21 +209,18 @@ void apply_window_inplace(float* buffer, const float* window, size_t n);
 float hz_to_omega(float hz, float sampleRate);
 
 
-// MOVE this to Effects layer not DSP core
-
-
 
 typedef struct {
   DSPState* state;
   Biquad inputHighpass;
-  float* waveshapeTable;
-  size_t waveshapeTableSize;
+  Biquad toneStack[3];
+  float* tubeTable;
+  size_t tubeTableSize;
   float tubeGain;
-  Biquad toneStack[3];         // Low, Mid, High bands
   float sagAmount;
   float sagTimeConstant;
   float supplyVoltage;
-  float supplyFilter;          // Sag filter state
+  float supplyFilter;
 } TubePreamp;
 
 typedef struct {
@@ -244,6 +241,9 @@ void compute_gain_reduction_db(const float* inputDb, const float* thresholdDb, f
 void tubepreamp_init(TubePreamp* preamp, DSPState* state, float* wsTable, size_t wsTableSize);
 void tubepreamp_process(TubePreamp* preamp, const float* in, float* out, size_t numSamples);
 void tubepreamp_set_gain(TubePreamp* preamp, float gainDb);
+void tubepreamp_set_bass(TubePreamp* preamp, float gainDb);
+void tubepreamp_set_mid(TubePreamp* preamp, float gainDb);
+void tubepreamp_set_treble(TubePreamp* preamp, float gainDb);
 
 void compressor_init(CompressorState* comp, DSPState* state, float attackMs, float releaseMs);
 void compressor_process(CompressorState* comp, const float* in, float* out, size_t numSamples);

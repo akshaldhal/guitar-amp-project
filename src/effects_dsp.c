@@ -1,9 +1,8 @@
 #include <effects_dsp.h>
 
-// implementations assumes 1 channel input and output, can be fixed upto 8 using simd, add loggers in init
-// and ONLY DEBUG loggers in process
-
-// Stateless:
+// implementations assumes 1 channel input and output, can be fixed upto 8 using simd
+// add loggers in init
+// ONLY DEBUG loggers in process as needed
 
 static inline float lerp_scalar(float a, float b, float t) {
   return a + t * (b - a);
@@ -113,8 +112,7 @@ void build_waveshaper_table(float *lookupTable, size_t tableSize, ClipperType ty
 }
 
 void waveshaper_lookup(const float* in, float* out, const float* lookupTable, size_t tableSize, size_t numSamples) {
-  const float half = 0.5f;
-  const float scale = (float)(tableSize - 1) * half;
+  const float scale = (float)(tableSize - 1) * 0.5f;
 
   for (size_t n = 0; n < numSamples; n++) {
     float x = fminf(1.0f, fmaxf(-1.0f, in[n]));
@@ -177,8 +175,6 @@ float ms_to_coeff(float ms, float sampleRate) {
   sampleRate = fmaxf(sampleRate, 1.0f);
   return 1.0f - expf(-1.0f / (0.001f * ms * sampleRate));
 }
-
-// States ahead, beaware:
 
 void onepole_init(OnePole* f, DSPState* state, float cutoffHz, int isHighPass) {
   f->state = state;
@@ -574,12 +570,6 @@ void delayline_read_cubic(DelayLine* dl, float* out, size_t numSamples, float de
   }
 }
 
-
-
-// These compute stuff right now, use pre comuted tables later (IF YOU WANT):
-// Also these are kinda AI generated formulas/comments, need a deeper review
-// Move to effects rather than dsp core
-
 void dsp_state_init(DSPState* state, float sampleRate, uint32_t numChannels, uint32_t blockSize) {
   if (numChannels > 1) {
     log_message(LOG_LEVEL_ERROR, "Only one channel supported at the moment");
@@ -620,122 +610,127 @@ void dsp_state_grow_scratches(DSPState* state, size_t newSize) {
   }
 }
 
-/*============================================================================
-  TUBE TABLE BUILDERS
-============================================================================*/
+void build_triode_table(float* table, size_t tableSize, const TubeParams* p, float gridMin, float gridMax, float Ep)
+{
+  if (!table || !p || tableSize == 0) return;
 
-void build_triode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax) {
-  if (table == NULL || tableSize == 0 || params == NULL) return;
   for (size_t i = 0; i < tableSize; i++) {
-    float v = vMin + (vMax - vMin) * (float)i / (float)(tableSize - 1);
-    float vgs = v - params->biasV;
-    float vgs_sq = vgs * vgs;
-    float denominator = params->Rp + params->k * (params->mu + 1.0f) * (vgs + sqrtf(vgs_sq + params->a));
-    if (fabsf(denominator) > 1e-9f) {
-      table[i] = ((params->mu + 1.0f) * vgs) / denominator;
-    } else {
+    float Eg = gridMin + (gridMax - gridMin) * (float)i / (tableSize - 1);
+
+    float sqrt_term = sqrtf(p->kvb + Ep * Ep);
+    float exp_arg = p->kp * (1.0f / p->mu + Eg / sqrt_term);
+    float arg = fminf(fmaxf(exp_arg, -80.0f), 80.0f);
+
+    float E1 = (Ep / p->kp) * logf(1.0f + expf(arg));
+
+    if (E1 > 0.0f)
+      table[i] = 2.0f * powf(E1, p->x) / p->kg1;
+    else
       table[i] = 0.0f;
-    }
-    table[i] = fmaxf(table[i], 0.0f);
   }
 }
 
-void build_pentode_table(float* table, size_t tableSize, const TubeParams* params, float vMin, float vMax) {
-  if (table == NULL || tableSize == 0 || params == NULL) return;
+void build_pentode_table(float* table, size_t tableSize, const TubeParams* p, float gridMin, float gridMax, float Eg2, float Ep)
+{
+  if (!table || !p || tableSize == 0) return;
+
   for (size_t i = 0; i < tableSize; i++) {
-    float v = vMin + (vMax - vMin) * (float)i / (float)(tableSize - 1);
-    float vgs = v - params->biasV;
-    float vgs_sq = vgs * vgs;
-    float denominator = params->Rp + params->k * (params->mu + 1.0f) * (vgs + sqrtf(vgs_sq + params->a));
-    float g1_factor = 1.0f + params->Kg1 * vgs;
-    if (fabsf(denominator) > 1e-9f) {
-      table[i] = (((params->mu + 1.0f) * vgs) / denominator) * g1_factor;
+    float Eg = gridMin + (gridMax - gridMin) * (float)i / (tableSize - 1);
+
+    float exp_arg = p->kp * (1.0f / p->mu + Eg / Eg2);
+    float arg = fminf(fmaxf(exp_arg, -80.0f), 80.0f);
+
+    float E1 = (Eg2 / p->kp) * logf(1.0f + expf(arg));
+
+    if (E1 > 0.0f) {
+      float base = 2.0f * powf(E1, p->x) / p->kg1;
+      float knee = atanf(Ep / p->kvb);
+      table[i] = base * knee;
     } else {
       table[i] = 0.0f;
     }
-    table[i] = fmaxf(table[i], 0.0f);
   }
 }
 
-void build_tube_table_from_koren(float* table, size_t tableSize, TubeType type, const TubeParams* params, float vMin, float vMax) {
-  if (table == NULL || tableSize == 0 || params == NULL) return;
+void build_tube_table_from_koren(float* table, size_t tableSize, TubeType type, const TubeParams* p, float vMin, float vMax, float Ep, float Eg2) {
+  if (!table || !p || tableSize == 0) return;
   switch (type) {
     case TUBE_TRIODE:
-      build_triode_table(table, tableSize, params, vMin, vMax);
+      build_triode_table(table, tableSize, p, vMin, vMax, Ep);
       break;
     case TUBE_PENTODE:
-      build_pentode_table(table, tableSize, params, vMin, vMax);
+      build_pentode_table(table, tableSize, p, vMin, vMax, Eg2, Ep);
       break;
     default:
       break;
   }
 }
 
-/*============================================================================
-  TUBE PREAMP - Uses dedicated scratch buffers
-============================================================================*/
-
-void tubepreamp_init(TubePreamp* preamp, DSPState* state, float* wsTable, size_t wsTableSize) {
+void tubepreamp_init(TubePreamp* preamp, DSPState* state, float* tubeTable, size_t tableSize) {
   preamp->state = state;
   biquad_init(&preamp->inputHighpass, state, BQ_HPF, 20.0f, 0.707f, 0.0f);
-  
-  preamp->waveshapeTable = wsTable;
-  preamp->waveshapeTableSize = wsTableSize;
+  preamp->tubeTable = tubeTable;
+  preamp->tubeTableSize = tableSize;
   preamp->tubeGain = 1.0f;
-  
   biquad_init(&preamp->toneStack[0], state, BQ_LOWSHELF, 80.0f, 0.707f, 0.0f);
   biquad_init(&preamp->toneStack[1], state, BQ_PEAK, 500.0f, 1.0f, 0.0f);
   biquad_init(&preamp->toneStack[2], state, BQ_HIGHSHELF, 8000.0f, 0.707f, 0.0f);
-  
   preamp->sagAmount = 0.1f;
-  preamp->sagTimeConstant = 0.05f;
+  preamp->sagTimeConstant = 50.0f;
+  preamp->supplyFilter = 0.0f;
   preamp->supplyVoltage = 1.0f;
-  preamp->supplyFilter = 1.0f;
 }
 
 void tubepreamp_process(TubePreamp* preamp, const float* in, float* out, size_t numSamples) {
-  if (numSamples > preamp->state->scratchSize) {
+  if (numSamples > preamp->state->scratchSize)
     dsp_state_grow_scratches(preamp->state, numSamples * 2);
-  }
-  
   float* temp = preamp->state->scratch[0];
-  
   biquad_process(&preamp->inputHighpass, in, temp, numSamples);
+  for (size_t i = 0; i < numSamples; i++)
+    temp[i] *= preamp->tubeGain;
+  float sagA = ms_to_coeff(preamp->sagTimeConstant, preamp->state->sampleRate);
 
   for (size_t i = 0; i < numSamples; i++) {
-    temp[i] *= preamp->tubeGain;
-  }
-  
-  float sag_coeff = ms_to_coeff(preamp->sagTimeConstant, preamp->state->sampleRate);
-  for (size_t i = 0; i < numSamples; i++) {
-    float input_level = fabsf(temp[i]);
-    float sag_amount = input_level * preamp->sagAmount;
-    preamp->supplyFilter += (sag_amount - preamp->supplyFilter) * sag_coeff;
-    preamp->supplyVoltage = 1.0f - clampf(preamp->supplyFilter, 0.0f, 0.3f);
+    float lvl = fabsf(temp[i]);
+    float target = preamp->sagAmount * lvl;
+    preamp->supplyFilter = preamp->supplyFilter + sagA * (target - preamp->supplyFilter);
+    preamp->supplyVoltage = 1.0f / (1.0f + clampf(preamp->supplyFilter, 0.0f, 0.3f));
+
     temp[i] *= preamp->supplyVoltage;
   }
-  
-  if (preamp->waveshapeTable && preamp->waveshapeTableSize > 0) {
-    waveshaper_lookup_cubic(temp, temp, preamp->waveshapeTable, 
-                            preamp->waveshapeTableSize, numSamples);
+  if (preamp->tubeTable && preamp->tubeTableSize > 0) {
+    waveshaper_lookup_cubic(
+      temp, temp,
+      preamp->tubeTable,
+      preamp->tubeTableSize,
+      numSamples
+    );
   }
-  
   biquad_process(&preamp->toneStack[0], temp, temp, numSamples);
   biquad_process(&preamp->toneStack[1], temp, temp, numSamples);
   biquad_process(&preamp->toneStack[2], temp, temp, numSamples);
-  
-  for (size_t i = 0; i < numSamples; i++) {
+  for (size_t i = 0; i < numSamples; i++)
     out[i] = clampf(temp[i], -1.0f, 1.0f);
-  }
 }
 
 void tubepreamp_set_gain(TubePreamp* preamp, float gainDb) {
   preamp->tubeGain = db_to_linear(clampf(gainDb, -12.0f, 48.0f));
 }
 
-/*============================================================================
-  COMPRESSOR - Uses dedicated scratch buffers
-============================================================================*/
+void tubepreamp_set_bass(TubePreamp* preamp, float gainDb) {
+  gainDb = clampf(gainDb, -12.0f, 12.0f);
+  biquad_set_params(&preamp->toneStack[0], BQ_LOWSHELF, 80.0f, 0.707f, gainDb);
+}
+
+void tubepreamp_set_mid(TubePreamp* preamp, float gainDb) {
+  gainDb = clampf(gainDb, -12.0f, 12.0f);
+  biquad_set_params(&preamp->toneStack[1], BQ_PEAK, 500.0f, 1.0f, gainDb);
+}
+
+void tubepreamp_set_treble(TubePreamp* preamp, float gainDb) {
+  gainDb = clampf(gainDb, -12.0f, 12.0f);
+  biquad_set_params(&preamp->toneStack[2], BQ_HIGHSHELF, 8000.0f, 0.707f, gainDb);
+}
 
 void compressor_init(CompressorState* comp, DSPState* state, float attackMs, float releaseMs) {
   comp->state = state;
@@ -744,66 +739,58 @@ void compressor_init(CompressorState* comp, DSPState* state, float attackMs, flo
   comp->threshold = -20.0f;
   comp->makeup = 0.0f;
   comp->kneeWidth = 0.0f;
-  comp->previousGain = 1.0f;
+  comp->previousGain = 0.0f;
 }
 
 void compressor_process(CompressorState* comp, const float* in, float* out, size_t numSamples) {
   if (numSamples > comp->state->scratchSize) {
     dsp_state_grow_scratches(comp->state, numSamples * 2);
   }
-  
-  float* inputDb = comp->state->scratch[0];
-  float* gainReduction = comp->state->scratch[1];
-  float* smoothedGain = comp->state->scratch[2];
-  float* thresholdDb = comp->state->scratch[3];
-  
-  // Convert input to dB
+  float* inputDb = comp->state->scratch[1];
+  float* gainRedDb = comp->state->scratch[2];
+  float* smoothDb = comp->state->scratch[3];
+
   for (size_t i = 0; i < numSamples; i++) {
     float level = fabsf(in[i]) + EPSILON_F;
     inputDb[i] = linear_to_db(level);
   }
-  
-  // Fill threshold array
+  float T = comp->threshold;
+  float knee = comp->kneeWidth * 0.5f;
   for (size_t i = 0; i < numSamples; i++) {
-    thresholdDb[i] = comp->threshold;
-  }
-  
-  // Compute gain reduction with soft knee if enabled
-  if (comp->kneeWidth > EPSILON_F) {
-    float knee_low = comp->threshold - comp->kneeWidth * 0.5f;
-    float knee_high = comp->threshold + comp->kneeWidth * 0.5f;
-    
-    for (size_t i = 0; i < numSamples; i++) {
-      float input = inputDb[i];
-      
-      if (input < knee_low) {
-        gainReduction[i] = 0.0f;
-      } else if (input > knee_high) {
-        float excess = input - comp->threshold;
-        gainReduction[i] = excess * (1.0f - 1.0f / comp->ratio);
+    float x = inputDb[i];
+
+    if (knee > 0.0f) {
+      if (x < T - knee) {
+        gainRedDb[i] = 0.0f;
+      } else if (x > T + knee) {
+        gainRedDb[i] = (x - T) * (1.0f - 1.0f / comp->ratio);
       } else {
-        float knee_t = (input - knee_low) / comp->kneeWidth;
-        float knee_t_sq = knee_t * knee_t;
-        float soft_ratio = 1.0f + (comp->ratio - 1.0f) * knee_t_sq;
-        float excess = input - comp->threshold + comp->kneeWidth * 0.5f;
-        gainReduction[i] = excess * (1.0f - 1.0f / soft_ratio);
+        float delta = x - (T - knee);
+        gainRedDb[i] = (1.0f - 1.0f / comp->ratio) * (delta * delta) / (2.0f * knee);
       }
+    } else {
+      if (x > T)
+        gainRedDb[i] = (x - T) * (1.0f - 1.0f / comp->ratio);
+      else
+        gainRedDb[i] = 0.0f;
     }
-  } else {
-    compute_gain_reduction_db(inputDb, thresholdDb, comp->ratio, gainReduction, numSamples);
   }
-  
-  // Smooth gain reduction
-  float attackCoeff = ms_to_coeff(10.0f, comp->state->sampleRate);
-  float releaseCoeff = ms_to_coeff(100.0f, comp->state->sampleRate);
-  apply_gain_smoothing(smoothedGain, gainReduction, &comp->previousGain, 
-                       attackCoeff, releaseCoeff, numSamples);
-  
-  // Convert gain reduction back to linear and apply makeup gain
-  float makeupLinear = db_to_linear(comp->makeup);
+  float a = comp->detector.attackCoeff;
+  float r = comp->detector.releaseCoeff;
+  float prev = comp->previousGain;
   for (size_t i = 0; i < numSamples; i++) {
-    float gainLin = db_to_linear(-smoothedGain[i]) * makeupLinear;
-    out[i] = in[i] * gainLin;
+    if (gainRedDb[i] > prev)
+      prev = prev + a * (gainRedDb[i] - prev);
+    else
+      prev = prev + r * (gainRedDb[i] - prev);
+
+    smoothDb[i] = prev;
+  }
+  comp->previousGain = prev;
+  float makeupLin = db_to_linear(comp->makeup);
+  for (size_t i = 0; i < numSamples; i++) {
+    float gain = db_to_linear(-smoothDb[i]) * makeupLin;
+    out[i] = in[i] * gain;
   }
 }
 

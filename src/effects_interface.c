@@ -79,7 +79,7 @@ void compressor_fx_process(Compressor* comp, const float* in, float* out, size_t
     dsp_state_grow_scratches(comp->state, numSamples * 2);
   }
   
-  float* envOut = comp->state->scratch[4];
+  float* envOut = comp->state->scratch[5];
   env_process(&comp->detector, in, envOut, numSamples);
   
   for (size_t i = 0; i < numSamples; i++) {
@@ -461,6 +461,7 @@ void ampchain_init(AmpChain* chain, DSPState* state, float* wsTable, size_t wsTa
   chain->bypass = false;
 
   build_waveshaper_table(wsTable, wsTableSize, CLIP_SOFT_TANH, 1.0f);
+  // build tube tables in one of the free scratches for tube amps/poweramps
   
   noisegate_init(&chain->noisegate, state, -40.0f, 1.0f, 100.0f, 50.0f);
   overdrive_init(&chain->overdrive, state, wsTable, wsTableSize);
@@ -479,7 +480,7 @@ void ampchain_process(AmpChain* chain, const float* in, float* out, size_t numSa
     }
 
     // Use a dedicated scratch buffer for the DSP chain
-    float* buf = chain->state->scratch[2];  // scratch[2] reserved for processing
+    float* buf = chain->state->scratch[6];  // scratch[6] reserved for processing
 
     // Ensure we never overflow (callback should never grow in real-time)
     if (numSamples > chain->state->scratchSize) {
