@@ -35,7 +35,7 @@
 #define M_PI 3.14159265358979323846f
 #endif
 
-#define NUM_SCRATCH_BUFFERS 8
+#define NUM_SCRATCH_BUFFERS 32
 
 static inline float clampf(float x, float lo, float hi) {
   return (x < lo) ? lo : (x > hi) ? hi : x;
@@ -208,46 +208,9 @@ void apply_window_inplace(float* buffer, const float* window, size_t n);
 
 float hz_to_omega(float hz, float sampleRate);
 
-
-
-typedef struct {
-  DSPState* state;
-  Biquad inputHighpass;
-  Biquad toneStack[3];
-  float* tubeTable;
-  size_t tubeTableSize;
-  float tubeGain;
-  float sagAmount;
-  float sagTimeConstant;
-  float supplyVoltage;
-  float supplyFilter;
-} TubePreamp;
-
-typedef struct {
-  DSPState* state;
-  EnvelopeDetector detector;
-  float ratio;
-  float threshold;
-  float makeup;
-  float kneeWidth;
-  float previousGain;
-} CompressorState;
-
-
 void apply_gain_smoothing(float* currentGain, const float* targetGain, float* state, float attackCoeff, float releaseCoeff, size_t numSamples);
 
 void compute_gain_reduction_db(const float* inputDb, const float* thresholdDb, float ratio, float* out, size_t numSamples);
-
-void tubepreamp_init(TubePreamp* preamp, DSPState* state, float* wsTable, size_t wsTableSize);
-void tubepreamp_process(TubePreamp* preamp, const float* in, float* out, size_t numSamples);
-void tubepreamp_set_gain(TubePreamp* preamp, float gainDb);
-void tubepreamp_set_bass(TubePreamp* preamp, float gainDb);
-void tubepreamp_set_mid(TubePreamp* preamp, float gainDb);
-void tubepreamp_set_treble(TubePreamp* preamp, float gainDb);
-
-void compressor_init(CompressorState* comp, DSPState* state, float attackMs, float releaseMs);
-void compressor_process(CompressorState* comp, const float* in, float* out, size_t numSamples);
-void compressor_set_params(CompressorState* comp, float threshold, float ratio, float makeup);
 
 
 
