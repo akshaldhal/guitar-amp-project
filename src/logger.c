@@ -5,33 +5,38 @@
 void log_message(LogLevel level, const char *message, ...) {
   va_list args;
   va_start(args, message);
+  FILE *stream = stdout;
 
   switch (level) {
     case LOG_LEVEL_DEBUG:
       if (DEBUG_MODE){
-        printf("\033[0;36m[DEBUG] ");
+        fprintf(stream, "\033[0;36m[DEBUG] ");
+      } else {
+        va_end(args);
+        return;
       }
       break;
     case LOG_LEVEL_INFO:
-      printf("\033[0;32m[INFO] ");
+      fprintf(stream, "\033[0;32m[INFO] ");
       break;
     case LOG_LEVEL_WARN:
-      printf("\033[0;33m[WARN] ");
+      fprintf(stream, "\033[0;33m[WARN] ");
       break;
     case LOG_LEVEL_ERROR:
-      printf("\033[0;31m[ERROR] ");
+      stream = stderr;
+      fprintf(stream, "\033[0;31m[ERROR] ");
       break;
     case LOG_LEVEL_TRACE:
-      printf("\033[0;35m[TRACE] ");
+      fprintf(stream, "\033[0;35m[TRACE] ");
       break;
     default:
-      printf("[LOG] ");
+      fprintf(stream, "[LOG] ");
       break;
   }
 
-  vprintf(message, args);
+  vfprintf(stream, message, args);
 
-  printf("\033[0m\n");
+  fprintf(stream, "\033[0m\n");
 
   va_end(args);
 }

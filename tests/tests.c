@@ -166,7 +166,7 @@ int get_simd_width() {
 }
 
 int main() {
-  // test_log_message();
+  test_log_message();
   // port_audio_stream_test();
   // printf("SIMD width: %d\n", get_simd_width());
   return 0;
